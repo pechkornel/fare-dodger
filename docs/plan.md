@@ -5,7 +5,7 @@ BKK network. Phase 1 covers the rules engine, transit routing, bots and simulati
 UI yet. This file holds the approved plan and the current status. Decisions with lasting
 consequences are recorded in [`decisions/`](decisions/).
 
-*Last updated: 2026-10-28 (phase 1 released as v0.1.0; phase 2 live prototype in progress)*.
+*Last updated: 2026-10-28 (phase 1 released as v0.1.0; the online live game as v0.2.0)*.
 
 ## Status at a glance
 
@@ -208,6 +208,13 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
   for the Dodger), ping arrows, a get-on/get-off switch with cancel, Bounty Hunters = Dodgers
   + 2, walkable parks and squares, and vehicles that spawn facing their way
   (`feat/live-menu-minimap`, ADR 0010).
+- ✅ Online rooms (create 1v1/2v2/3v3, join by code, solo), bots in empty places, hunters +2,
+  a random first side, points per Dodger, safety caps, automatic service date, vendored front
+  end, Docker Compose with Cloudflare Tunnel; released as 0.2.0 (`feat/online-deploy`,
+  ADR 0011).
+- Next: play online with friends and tune (bot strength, `hunter_extra` per room size, round
+  length); spectating for caught players beyond following the team; persistent player names
+  and stats.
 - Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and keep
   polishing the graphics. Multiplayer is further away.
 

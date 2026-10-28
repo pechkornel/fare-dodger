@@ -3,7 +3,9 @@
 # code defaults; each [[district]] below replaces [network.area] with its own polygon.
 
 [network]
-service_date = "2026-11-17"   # same pinned Tuesday as configs/default.toml
+# "auto": the Tue/Wed/Thu with the most trips inside the downloaded feed's validity, so the
+# server keeps working when BKK publishes a new feed. Set a date ("2026-11-17") to pin it.
+service_date = "auto"
 window_start = "07:30"
 window_end = "09:30"
 # RAPTOR's walking transfers use the live game's jogging speed, along streets (detour).

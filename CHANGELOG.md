@@ -6,7 +6,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-28
+
+The live game: a real-time, online, 3D version of Fare Dodger, ready to self-host.
+
 ### Added
+- Online play: create a room (1v1, 2v2 or 3v3) or join one by its code, or play solo. Empty
+  places are bots, the hunting side gets two extra bots, a random team runs first, and the
+  host starts the match. Every Dodger is a point (escaped: runners, caught: hunters), so a
+  round can end 1-1. Players who leave are replaced by bots. ADR 0011.
+- Deployment: a multi-stage Dockerfile (uv, non-root) and `compose.yaml` with a `game`
+  service on port 8001, `./data` as a volume, a `/healthz` healthcheck, `restart:
+  unless-stopped`, a memory limit, and a `tunnel` service (cloudflared, token from `.env`,
+  profile `tunnel`). See the README's deployment section.
+- Safety caps from the environment: at most 20 rooms, at most 2 rooms per address (using
+  `CF-Connecting-IP` behind the tunnel), and rooms close when empty or after 2 minutes without
+  input.
 - Live prototype (`fare-dodger play`): a real-time, single-player browser game on an inner-Pest
   district. Walk with WASD, wait for and ride real trips, and avoid bot Inspectors who are pinged
   your position every 3 minutes. FastAPI WebSocket server, Leaflet client on OpenStreetMap tiles,
@@ -46,6 +61,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
   Bounty Hunters always two more than the Dodgers (`hunter_extra`), parks and squares walkable
   in any direction, and vehicles that appear facing their direction of travel. ADR 0010.
 
+### Changed
+- `configs/live.toml` picks the service day automatically (`service_date = "auto"`): the
+  busiest Tuesday, Wednesday or Thursday inside the downloaded feed's validity, which is now
+  respected by `"auto"` and checked for pinned dates. `configs/default.toml` stays pinned to
+  keep the published simulation numbers reproducible.
+- MapLibre GL JS 4.7.1, three.js 0.169.0 and the Fredoka font are vendored into the static
+  files instead of loaded from unpkg, jsdelivr and Google Fonts.
+
 ## [0.1.0] - 2026-10-28
 
 ### Added
@@ -77,5 +100,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - `configs/default.toml` pins `service_date = "2026-11-17"` so simulations are reproducible;
   a pinned date missing from the feed now gives an error saying how to fix it.
 
-[Unreleased]: https://github.com/pechkornel/fare-dodger/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/pechkornel/fare-dodger/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/pechkornel/fare-dodger/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/pechkornel/fare-dodger/releases/tag/v0.1.0
