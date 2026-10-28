@@ -33,6 +33,8 @@ let town = null;         // the 3D layer
 let ws = null;
 let follow = true;
 let dragging = false;
+let rotating = false;
+let pressed = false;       // a mouse button or finger is down on the map
 let shownRound = null;   // round whose result overlay is showing
 let burstTimer = null;
 let match = null;
@@ -124,12 +126,26 @@ function createMap(w) {
     center: lngLat(w.center), zoom: cam.zoom, pitch: pitchForZoom(cam.zoom),
     minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxPitch: MAX_PITCH,
     attributionControl: { compact: true },
-    dragRotate: false, pitchWithRotate: false, touchPitch: false, keyboard: false,
+    // Right-click drag (or Ctrl+drag) turns the map; the tilt still follows the zoom.
+    dragRotate: true, pitchWithRotate: false, touchPitch: false, keyboard: false,
     scrollZoom: false, doubleClickZoom: false, boxZoom: false,
   });
-  map.touchZoomRotate.disableRotation();
   map.on("dragstart", () => { dragging = true; setFollow(false); });
+  // WASD are relative to the screen: tell the server whenever the map turns under held keys.
+  map.on("rotate", () => {
+    if (keys.up || keys.down || keys.left || keys.right) sendKeys();
+  });
   map.on("dragend", () => { dragging = false; });
+  // The camera loop's jumpTo stops any gesture in progress (even before MapLibre starts
+  // it), so the loop pauses while a mouse button or a finger is down on the map.
+  map.on("rotatestart", () => { rotating = true; });
+  map.on("rotateend", () => { rotating = false; });
+  const container = map.getCanvasContainer();
+  container.addEventListener("mousedown", () => { pressed = true; });
+  container.addEventListener("touchstart", () => { pressed = true; }, { passive: true });
+  window.addEventListener("mouseup", () => { pressed = false; });
+  window.addEventListener("touchend", () => { pressed = false; });
+  container.addEventListener("contextmenu", (ev) => ev.preventDefault());
   map.on("zoom", (ev) => { if (ev.originalEvent) cam.zoom = map.getZoom(); }); // pinch
   map.getCanvasContainer().addEventListener("wheel", (ev) => {
     ev.preventDefault();
@@ -155,7 +171,7 @@ function frame() {
     pendingEvents = [];
     render(snapshot);
   }
-  if (!map || dragging) return;
+  if (!map || dragging || rotating || pressed) return;
   const z = map.getZoom();
   const now = performance.now();
   const dt = Math.min(0.1, (now - (cam.last || now)) / 1000);
@@ -632,7 +648,9 @@ function restart() {
 
 // --- input ------------------------------------------------------------------------------
 
-function sendKeys() { send({ type: "keys", ...keys }); }
+function sendKeys() {
+  send({ type: "keys", ...keys, bearing: map ? map.getBearing() : 0 });
+}
 
 window.addEventListener("keydown", (ev) => {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
@@ -658,6 +676,7 @@ window.addEventListener("keydown", (ev) => {
   else if (ev.code === "KeyT") send({ type: "ticket" });
   else if (ev.code === "KeyC") send({ type: "coffee" });
   else if (ev.code === "KeyF") setFollow(true);
+  else if (ev.code === "KeyN" && map) { map.setBearing(0); sendKeys(); }
   else if (ev.code === "Equal" || ev.code === "NumpadAdd") zoomBy(1);
   else if (ev.code === "Minus" || ev.code === "NumpadSubtract") zoomBy(-1);
   else if (ev.code === "KeyR") restart();

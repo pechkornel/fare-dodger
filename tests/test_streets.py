@@ -8,8 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from fare_dodger.config import LiveConfig, NetworkConfig, PolygonArea
-from fare_dodger.live.game import Keys, LiveGame, Status
+from fare_dodger.config import PolygonArea
 from fare_dodger.live.streets import (
     STREETS_VERSION,
     EdgePos,
@@ -21,8 +20,6 @@ from fare_dodger.live.streets import (
     overpass_query,
     read_streets,
 )
-from fare_dodger.live.world import World
-from fare_dodger.network.timetable import Timetable
 
 EAST, NORTH, WEST, SOUTH = (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)
 
@@ -132,30 +129,6 @@ def test_download_streets_posts_the_query(tmp_path: Path) -> None:
     assert "highway" in httpx.QueryParams(seen[0])["data"]
     assert httpx.QueryParams(seen[0])["data"] == overpass_query(bbox)
     assert read_streets(path, bbox) is not None
-
-
-def test_walking_in_a_game_stays_on_the_streets(
-    timetable: Timetable, fixture_network_config: NetworkConfig
-) -> None:
-    world = World(timetable, fixture_network_config.area)
-    central = world.node_xy[world.tt.find_nodes("Central")[0]]
-    cx, cy = central
-    # A plus-shaped crossing at Central: one street east-west, one north-south.
-    world.set_streets(
-        StreetGraph(
-            [(cx - 500, cy), (cx, cy), (cx + 500, cy), (cx, cy - 500), (cx, cy + 500)],
-            [(0, 1), (1, 2), (3, 1), (1, 4)],
-        )
-    )
-    game = LiveGame(world, LiveConfig(inspected_share=0.0), seed=1)
-    game.hunters.agents = []
-    game.dodger.pos = central
-    game.keys = Keys(up=True, right=True)  # diagonal: must pick one street
-    game.step(20)
-    x, y = game.dodger.pos
-    assert (x == pytest.approx(cx) and y > cy) or (y == pytest.approx(cy) and x > cx)
-    assert math.dist(central, game.dodger.pos) == pytest.approx(20 * game.cfg.walk_speed_mps)
-    assert game.status is Status.RUNNING
 
 
 def test_a_tight_bend_is_walked_round_holding_one_key() -> None:

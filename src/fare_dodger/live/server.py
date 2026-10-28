@@ -385,6 +385,9 @@ def apply_message(game: LiveGame, msg: dict[str, Any], pid: str | None = None) -
                 down=bool(msg.get("down")),
                 left=bool(msg.get("left")),
                 right=bool(msg.get("right")),
+                bearing=float(msg.get("bearing") or 0.0)
+                if isinstance(msg.get("bearing"), (int, float))
+                else 0.0,
             ),
             pid,
         )

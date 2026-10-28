@@ -6,6 +6,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Live game: walk anywhere except through buildings (OpenStreetMap footprints, downloaded once);
+  streets, rail lines, parks and squares are all open, and you slide along walls. This
+  replaces walking along street lines and the separate park rules. `--free-walk` is now
+  `--no-osm`. ADR 0012.
+- Live game: WASD follow the screen (up is the top of the view, two keys make a diagonal),
+  right-drag turns the map, and N turns it back to north. Map gestures no longer get cancelled
+  by the follow camera.
+
 ## [0.2.0] - 2026-10-28
 
 The live game: a real-time, online, 3D version of Fare Dodger, ready to self-host.

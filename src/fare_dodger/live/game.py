@@ -20,6 +20,7 @@ and wins by lasting ``duration_minutes``.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -28,8 +29,8 @@ from typing import Any
 from fare_dodger.config import LiveConfig
 from fare_dodger.live.bots import AgentState, BountyHunters, Ping
 from fare_dodger.live.dodger_bot import BotDodger
-from fare_dodger.live.streets import EdgePos, RouteFollower
-from fare_dodger.live.world import Departure, Point, World, distance
+from fare_dodger.live.streets import RouteFollower
+from fare_dodger.live.world import Departure, Point, World, distance, step_towards
 from fare_dodger.routing.raptor import reachable
 from fare_dodger.timeutil import format_hms
 
@@ -38,10 +39,8 @@ DEPARTURE_HORIZON_S = 15 * 60
 DEPARTURE_LIMIT = 6
 #: Movement and catches are evaluated at least this often (timetable seconds).
 MAX_SUBSTEP_S = 1.0
-#: Leaving a park, a street this close is stepped onto (metres).
-PARK_EXIT_M = 15.0
-#: Open ground this far ahead (across a pavement) can be walked onto (metres).
-PARK_ENTER_M = 12.0
+#: Blocked by a wall, try these turns (radians) to slide along it, the straight way first.
+SLIDE_ANGLES = (0.0, 0.6, -0.6, 1.2, -1.2)
 
 
 class Status(StrEnum):
@@ -61,16 +60,25 @@ class Role(StrEnum):
 
 @dataclass
 class Keys:
+    """Keys held, relative to the screen: up is the top of the player's map view."""
+
     up: bool = False
     down: bool = False
     left: bool = False
     right: bool = False
+    #: The map view's rotation (degrees clockwise from north), so up means "up on screen".
+    bearing: float = 0.0
 
     def direction(self) -> Point:
+        """The unit vector to walk along (x east, y north), or ``(0, 0)``."""
         dx = float(self.right) - float(self.left)
         dy = float(self.up) - float(self.down)
         norm = (dx * dx + dy * dy) ** 0.5
-        return (dx / norm, dy / norm) if norm else (0.0, 0.0)
+        if not norm:
+            return (0.0, 0.0)
+        dx, dy = dx / norm, dy / norm
+        b = math.radians(self.bearing)
+        return (dx * math.cos(b) + dy * math.sin(b), -dx * math.sin(b) + dy * math.cos(b))
 
 
 @dataclass
@@ -107,8 +115,7 @@ class Traveller:
     #: Running on coffee until this time.
     boosted_until: float | None = None
     coffees: int = 0
-    #: Where on the street graph, when walking on streets (``None``: snap on the next step).
-    street: EdgePos | None = None
+    #: A bot's street route.
     follower: RouteFollower = field(default_factory=RouteFollower)
 
 
@@ -557,7 +564,6 @@ class LiveGame:
                 who.waiting_for = None
                 who.ride = Ride(dep.trip, dep.pos)
                 who.pos = world.stop_point(dep.pattern, dep.pos)
-                who.street = None
                 who.follower.reset()
                 who.rides += 1
                 self._tell(who, "board", f"You boarded {dep.route} towards {dep.headsign}.")
@@ -566,75 +572,45 @@ class LiveGame:
                 return
         boosted = who.boosted_until is not None
         step = (self.cfg.coffee_speed_mps if boosted else self.cfg.walk_speed_mps) * h
-        if world.streets is not None:
-            self._walk_streets(who, step, direction, target)
+        if target is not None:  # bots: along the streets (straight without street data)
+            old = who.pos
+            if world.streets is not None:
+                who.pos = world.walk_towards(who.follower, who.pos, target, step)
+            else:
+                who.pos = step_towards(who.pos, target, step)
+            who.walked_m += distance(old, who.pos)
             return
-        if target is not None:
-            gap = distance(who.pos, target)
-            if gap < 1e-9:
-                return
-            step = min(step, gap)
-            direction = ((target[0] - who.pos[0]) / gap, (target[1] - who.pos[1]) / gap)
         if direction is None or direction == (0.0, 0.0):
             return
+        self._walk_free(who, step, direction)
+
+    def _walk_free(self, who: Traveller, step: float, direction: Point) -> None:
+        """Walk anywhere in the play area except into a building, sliding along walls.
+
+        Starting inside a footprint (rare: a stop drawn inside a building) lets you walk out.
+        """
+        world, buildings = self.world, self.world.buildings
+        inside = buildings.at(who.pos) if buildings is not None else None
+
+        def free(p: Point) -> bool:
+            if not world.contains(p):
+                return False
+            if buildings is None:
+                return True
+            hit = buildings.at(p)
+            return hit is None or hit == inside
+
         dx, dy = direction
         x, y = who.pos
-        for candidate in ((x + dx * step, y + dy * step), (x + dx * step, y), (x, y + dy * step)):
-            if candidate != who.pos and world.contains(candidate):
+        for angle in SLIDE_ANGLES:
+            c, s = math.cos(angle), math.sin(angle)
+            # Turned away from a wall, the move keeps only its share of the intended step.
+            ux, uy = dx * c - dy * s, dx * s + dy * c
+            candidate = (x + ux * step * c, y + uy * step * c)
+            if free(candidate):
                 who.walked_m += distance(who.pos, candidate)
                 who.pos = candidate
                 return
-
-    def _walk_streets(
-        self, who: Traveller, step: float, direction: Point | None, target: Point | None
-    ) -> None:
-        streets = self.world.streets
-        assert streets is not None
-        old = who.pos
-        if target is not None:
-            who.pos = streets_pos = self.world.walk_towards(who.follower, who.pos, target, step)
-            who.street = None
-        else:
-            if direction is None or direction == (0.0, 0.0):
-                return
-            if self._walk_open_ground(who, step, direction):
-                who.walked_m += distance(old, who.pos)
-                return
-            here = who.street
-            if here is None or distance(streets.point(here), who.pos) > 1e-6:
-                here = streets.snap(who.pos)  # e.g. after getting off: step onto the street
-            who.street = streets.move(here, direction, step)
-            who.pos = streets_pos = streets.point(who.street)
-        who.walked_m += distance(old, streets_pos)
-
-    def _walk_open_ground(self, who: Traveller, step: float, direction: Point) -> bool:
-        """Walk freely across parks and squares. Returns ``False`` to walk on the streets
-        instead: when the way ahead is not open ground and a street is close by."""
-        parks, streets, world = self.world.parks, self.world.streets, self.world
-        if parks is None or streets is None:
-            return False
-        x, y = who.pos
-        dx, dy = direction
-
-        def open_ground(p: Point) -> bool:
-            return parks.contains(p) and world.contains(p)
-
-        straight = (x + dx * step, y + dy * step)
-        # Parks usually start a few metres off the street: head for one just ahead too.
-        probe = (x + dx * PARK_ENTER_M, y + dy * PARK_ENTER_M)
-        if open_ground(straight) or (open_ground(probe) and world.contains(straight)):
-            who.pos, who.street = straight, None
-            return True
-        if who.street is not None or not parks.contains(who.pos):
-            return False  # on a street: keep to the streets
-        # In a park, facing its edge: step onto a street close by, or slide along the edge.
-        if distance(streets.point(streets.snap(who.pos)), who.pos) <= PARK_EXIT_M:
-            return False
-        for slide in ((x + dx * step, y), (x, y + dy * step)):
-            if slide != who.pos and open_ground(slide):
-                who.pos = slide
-                return True
-        return True  # stuck at the edge, with no street nearby
 
     def _runner_of(self, who: Traveller) -> Runner | None:
         return next((r for r in self.runners if r.traveller is who), None)
