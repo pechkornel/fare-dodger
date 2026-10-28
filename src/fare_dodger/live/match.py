@@ -1,20 +1,25 @@
-"""A match: rounds of the live game between the human's team and the bots, CS-style.
+"""A match: rounds of the live game between two teams, CS-style.
 
-The first team to win more than half of ``regulation_rounds`` (6 of 10) takes the match.
-The human plays ``start_role`` for the first half of regulation and the other side for the
-second half. At a tie after regulation (5-5), overtime rounds alternate sides every round
-until one team leads by two. Every round is played on a district, in a shuffled order that
-repeats once all districts have been played.
+Each team has ``size`` places (1v1, 2v2 or 3v3); places without a human are played by bots.
+Every round one team runs (the Dodgers) and the other hunts, with ``hunter_extra`` more bots
+on the hunting side. Every Dodger is worth a point: one that escapes scores for the runners,
+one that is caught scores for the hunters (so a 2v2 round can end 1-1).
+
+The first team to more than half of the regulation points (``regulation_rounds`` times ``size``;
+6 of 10 in 1v1) takes the match. Team A plays its starting side for the first half of
+regulation and the other side for the second half. At a tie after regulation, overtime
+rounds alternate sides every round until one team leads by two points. Every round is played
+on a district, in a shuffled order that repeats once all districts have been played.
 """
 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fare_dodger.config import LiveConfig
-from fare_dodger.live.game import LiveGame, Role, Status
+from fare_dodger.live.game import YOU, LiveGame, Role, Seat, Status
 from fare_dodger.live.world import World
 
 
@@ -24,17 +29,26 @@ class District:
     world: World
 
 
+@dataclass
+class Team:
+    name: str
+    #: The human players: (id, name).
+    players: list[tuple[str, str]] = field(default_factory=list)
+
+
 @dataclass(frozen=True, slots=True)
 class RoundResult:
     number: int
     district: int
+    #: Team A's side in this round.
     role: Role
-    won: bool
+    #: Points scored by team A and team B.
+    points: tuple[int, int]
     text: str
 
 
 def role_for(round_number: int, regulation: int, start: Role) -> Role:
-    """The human's side in round ``round_number`` (1-based)."""
+    """Team A's side in round ``round_number`` (1-based), starting as ``start``."""
     half = regulation // 2
     if round_number <= half:
         return start
@@ -44,27 +58,39 @@ def role_for(round_number: int, regulation: int, start: Role) -> Role:
     return start if (round_number - regulation - 1) % 2 == 0 else start.other
 
 
-def match_winner(you: int, bots: int, rounds: int, regulation: int) -> bool | None:
-    """``True`` if the human's team has won, ``False`` if the bots have, ``None`` if it goes on."""
+def match_winner(a: int, b: int, rounds: int, regulation: int, size: int = 1) -> bool | None:
+    """``True`` if team A has won on points, ``False`` if team B has, ``None`` if it goes on."""
     if rounds <= regulation:
-        target = regulation // 2 + 1
-        if you >= target or bots >= target:
-            return you > bots
+        target = regulation * size // 2 + 1
+        if a >= target or b >= target:
+            return a > b
         return None
-    if abs(you - bots) >= 2:
-        return you > bots
+    if abs(a - b) >= 2:
+        return a > b
     return None
 
 
 class Match:
-    def __init__(self, districts: list[District], cfg: LiveConfig, seed: int) -> None:
+    def __init__(
+        self,
+        districts: list[District],
+        cfg: LiveConfig,
+        seed: int,
+        teams: list[Team] | None = None,
+        size: int = 1,
+        start: Role | None = None,
+    ) -> None:
+        """Without ``teams``, a single-player match: you against the bots, starting as
+        ``cfg.start_role``. ``start`` is team A's side in the first round."""
         if not districts:
             msg = "a match needs at least one district"
             raise ValueError(msg)
         self.districts = districts
         self.cfg = cfg
         self.rng = random.Random(seed)
-        self.start_role = Role(cfg.start_role)
+        self.teams = teams or [Team("You", [(YOU, "You")]), Team("Bots")]
+        self.size = max(size, *(len(t.players) for t in self.teams))
+        self.start = start if start is not None else Role(cfg.start_role)
         self.order: list[int] = []
         self.results: list[RoundResult] = []
         self.game = self._new_game()
@@ -79,13 +105,22 @@ class Match:
 
     @property
     def score(self) -> tuple[int, int]:
-        you = sum(r.won for r in self.results)
-        return you, len(self.results) - you
+        """Points of team A and team B."""
+        return sum(r.points[0] for r in self.results), sum(r.points[1] for r in self.results)
 
     @property
-    def winner(self) -> bool | None:
-        you, bots = self.score
-        return match_winner(you, bots, len(self.results), self.cfg.regulation_rounds)
+    def winner(self) -> int | None:
+        """The winning team's index, once there is one."""
+        a, b = self.score
+        won = match_winner(a, b, len(self.results), self.cfg.regulation_rounds, self.size)
+        return None if won is None else (0 if won else 1)
+
+    def team_of(self, pid: str) -> int:
+        for i, team in enumerate(self.teams):
+            if any(p == pid for p, _ in team.players):
+                return i
+        msg = f"{pid!r} is in neither team"
+        raise KeyError(msg)
 
     def _district_for(self, number: int) -> int:
         while len(self.order) < number:
@@ -96,25 +131,33 @@ class Match:
             self.order.extend(cycle)
         return self.order[number - 1]
 
+    def _seats(self, team: Team, label: str) -> list[Seat]:
+        seats = [Seat(pid, name) for pid, name in team.players]
+        seats += [Seat(None, f"{label} bot {k + 1}") for k in range(self.size - len(seats))]
+        return seats
+
     def _new_game(self) -> LiveGame:
         number = len(self.results) + 1
         self._game_number = number
         self.district = self._district_for(number)
-        self.role = role_for(number, self.cfg.regulation_rounds, self.start_role)
+        self.role = role_for(number, self.cfg.regulation_rounds, self.start)
+        runners_team = 0 if self.role is Role.DODGER else 1
+        runners = self._seats(self.teams[runners_team], "Dodger")
+        hunters = self._seats(self.teams[1 - runners_team], "Hunter")
         world = self.districts[self.district].world
-        return LiveGame(world, self.cfg, self.rng.randrange(2**31), self.role)
+        return LiveGame(
+            world, self.cfg, self.rng.randrange(2**31), runners=runners, hunters=hunters
+        )
 
     def update(self) -> None:
         """Record the current round once it is over."""
         game = self.game
         if game.status is Status.RUNNING or self.round_recorded:
             return
-        won = game.player_won
-        assert won is not None
-        text = game.caught_by or (
-            "You escaped!" if game.role is Role.DODGER else "The Dodger got away."
-        )
-        self.results.append(RoundResult(self._game_number, self.district, game.role, won, text))
+        free, caught = game.result()
+        points = (free, caught) if self.role is Role.DODGER else (caught, free)
+        text = game.caught_by or ("Every Dodger escaped." if not caught else "")
+        self.results.append(RoundResult(self._game_number, self.district, self.role, points, text))
 
     def next_round(self) -> bool:
         """Start the next round, if the current one is over and the match is not."""
@@ -124,24 +167,40 @@ class Match:
         self.game = self._new_game()
         return True
 
-    def view(self) -> dict[str, Any]:
-        you, bots = self.score
+    def view(self, pid: str | None = None) -> dict[str, Any]:
+        """The match from one player's side ("you" is their team, "them" the other)."""
+        mine = self.team_of(pid) if pid is not None else 0
+        other = 1 - mine
+        score = self.score
         number = self.round_number
         regulation = self.cfg.regulation_rounds
         winner = self.winner
+        my_role = self.role if mine == 0 else self.role.other
         next_role = None
         if self.round_recorded and winner is None:
-            next_role = role_for(number + 1, regulation, self.start_role).value
+            team_a = role_for(number + 1, regulation, self.start)
+            next_role = (team_a if mine == 0 else team_a.other).value
         return {
             "round": number,
             "regulation": regulation,
             "overtime": number > regulation,
-            "score": {"you": you, "bots": bots},
-            "role": self.role.value,
+            "size": self.size,
+            "target": regulation * self.size // 2 + 1,
+            "score": {"you": score[mine], "them": score[other]},
+            "names": {"you": self.teams[mine].name, "them": self.teams[other].name},
+            "role": my_role.value,
             "district": self.district,
             "district_name": self.districts[self.district].name,
             "round_over": self.round_recorded,
             "next_role": next_role,
-            "winner": None if winner is None else ("you" if winner else "bots"),
-            "history": [{"won": r.won, "role": r.role.value} for r in self.results],
+            "winner": None if winner is None else ("you" if winner == mine else "them"),
+            "history": [
+                {
+                    "you": r.points[mine],
+                    "them": r.points[other],
+                    "won": r.points[mine] > r.points[other],
+                    "role": (r.role if mine == 0 else r.role.other).value,
+                }
+                for r in self.results
+            ],
         }

@@ -202,13 +202,15 @@ def test_server_serves_districts_and_streams_a_match(world: World) -> None:
     assert client.get("/api/world/1").status_code == 404
     assert "maplibre-gl" in client.get("/").text
     with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "solo", "role": "dodger"})
         first = ws.receive_json()
+        assert first["type"] == "snapshot"
         assert first["status"] == "running" and first["player"]["state"] == "walk"
         assert first["match"]["round"] == 1 and first["match"]["role"] == "dodger"
-        assert first["match"]["score"] == {"you": 0, "bots": 0}
+        assert first["match"]["score"] == {"you": 0, "them": 0}
         ws.send_json({"type": "keys", "up": True})
         ws.send_json({"type": "next"})  # ignored: the round is still running
-        ws.send_json({"type": "restart"})
+        ws.send_json({"type": "restart"})  # ignored: the match is not over
         assert ws.receive_json()["match"]["round"] == 1
 
 
@@ -373,6 +375,8 @@ def finish_round(match: Match, won: bool) -> None:
     """End the current round with the human's side winning or losing."""
     game = match.game
     dodger_wins = won == (game.role is Role.DODGER)
+    for runner in game.runners:
+        runner.caught = not dodger_wins
     game.status = Status.ESCAPED if dodger_wins else Status.CAUGHT
     match.update()
 
@@ -392,7 +396,7 @@ def test_match_plays_rounds_switches_sides_and_ends(world: World) -> None:
     assert match.game.role is Role.HUNTER
     finish_round(match, True)  # 3-1: first to 3 of 4
     view = match.view()
-    assert view["winner"] == "you" and view["score"] == {"you": 3, "bots": 1}
+    assert view["winner"] == "you" and view["score"] == {"you": 3, "them": 1}
     assert [r["won"] for r in view["history"]] == [True, False, True, True]
     assert match.next_round() is False
 
@@ -466,7 +470,7 @@ def test_server_starts_on_the_side_picked_in_the_menu_after_a_countdown(world: W
         ws.send_json({"type": "use"})  # ignored during the countdown
         assert ws.receive_json()["t"] == first["t"]  # the clock waits too
     with client.websocket_connect("/ws?role=nonsense") as ws:
-        assert ws.receive_json()["match"]["role"] == "dodger"  # the configured default
+        assert ws.receive_json()["match"]["role"] in ("dodger", "hunter")  # picked at random
 
 
 def test_vehicles_report_their_heading(world: World) -> None:

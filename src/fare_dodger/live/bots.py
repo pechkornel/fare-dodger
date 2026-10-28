@@ -33,6 +33,8 @@ class Ping:
     time: int
     pos: Point
     node: int
+    #: Which Dodger was reported (index into the round's runners).
+    runner: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +112,8 @@ class BountyHunters:
         self.cfg = cfg
         self.rng = rng
         self.last_ping: Ping | None = None
+        #: The latest report of each Dodger still in play.
+        self.last_pings: list[Ping] = []
         targets = self._spread(list(range(world.tt.n_nodes)), len(starts), seed_node=None)
         self.agents = [
             Agent(node, world.node_xy[node], target)
@@ -119,9 +123,23 @@ class BountyHunters:
     # --- knowledge -------------------------------------------------------------------------
 
     def on_ping(self, ping: Ping) -> None:
-        self.last_ping = ping
-        spread = reachable(self.world.tt, [ping.node], ping.time, PING_SPREAD_S).reached()
-        targets = self._spread(spread or [ping.node], len(self.agents), seed_node=ping.node)
+        self.on_pings([ping])
+
+    def on_pings(self, pings: list[Ping]) -> None:
+        """New reports (the latest of each Dodger still in play): share the team between
+        them, the freshest first, and spread each share over where that Dodger could be."""
+        if not pings:
+            return
+        pings = sorted(pings, key=lambda p: (-p.time, p.runner))
+        self.last_ping, self.last_pings = pings[0], pings
+        k, m = len(self.agents), len(pings)
+        targets: list[int] = []
+        for i, ping in enumerate(pings):
+            share = k // m + (1 if i < k % m else 0)
+            if share == 0:
+                continue
+            spread = reachable(self.world.tt, [ping.node], ping.time, PING_SPREAD_S).reached()
+            targets += self._spread(spread or [ping.node], share, seed_node=ping.node)
         origins = [self._planning_node(a) for a in self.agents]
         for agent, target in zip(self.agents, self._assign(origins, targets), strict=True):
             agent.target = target
@@ -165,15 +183,19 @@ class BountyHunters:
 
     # --- movement --------------------------------------------------------------------------
 
-    def advance(self, t: float, dt: float, dodger: Point, dodger_on_foot: bool) -> None:
+    def advance(self, t: float, dt: float, dodgers: list[tuple[Point, bool]]) -> None:
+        """Move every Bounty Hunter for ``dt`` seconds. ``dodgers`` are the Dodgers still in
+        play: position, and whether on foot (only those can be seen and chased)."""
         step = self.cfg.walk_speed_mps * dt
         for agent in self.agents:
             on_foot = agent.trip is None
-            if (
-                dodger_on_foot
-                and on_foot
-                and distance(agent.pos, dodger) <= self.cfg.sight_radius_m
-            ):
+            in_sight = [
+                pos
+                for pos, foot in dodgers
+                if foot and on_foot and distance(agent.pos, pos) <= self.cfg.sight_radius_m
+            ]
+            dodger = min(in_sight, key=lambda p: distance(agent.pos, p), default=None)
+            if dodger is not None:
                 if not agent.chasing:
                     agent.follower.reset()
                 agent.chasing, agent.plan, agent.returning_to = True, None, None
@@ -216,11 +238,12 @@ class BountyHunters:
     def _search_target(self, t: float) -> int:
         """A station the Dodger could be at now, given the last ping (any before one)."""
         tt = self.world.tt
-        if self.last_ping is None:
+        if not self.last_pings:
             return self.rng.randrange(tt.n_nodes)
-        horizon = int(t) - self.last_ping.time + SEARCH_LOOKAHEAD_S
-        nodes = reachable(tt, [self.last_ping.node], self.last_ping.time, horizon).reached()
-        return self.rng.choice(nodes) if nodes else self.last_ping.node
+        ping = self.rng.choice(self.last_pings)
+        horizon = int(t) - ping.time + SEARCH_LOOKAHEAD_S
+        nodes = reachable(tt, [ping.node], ping.time, horizon).reached()
+        return self.rng.choice(nodes) if nodes else ping.node
 
     def _plan(self, origin: int, target: int, t: float) -> Journey | None:
         if origin == target:
