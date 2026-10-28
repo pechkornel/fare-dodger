@@ -38,6 +38,17 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
   color: var(--ink); text-shadow: 2px 2px 0 var(--sun); margin-bottom: 6px; }
 .logo span { font-size: 12px; font-weight: 600; color: var(--muted); text-shadow: none;
   text-transform: uppercase; letter-spacing: 1px; margin-left: 4px; }
+.scoreboard { display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin: 4px 0 6px; padding: 4px 8px; border: 3px solid var(--ink); border-radius: 14px;
+  background: #fff; font-size: 17px; font-weight: 600; }
+.scoreboard b { font-size: 26px; font-variant-numeric: tabular-nums; }
+.scoreboard .you b { color: var(--ok); }
+.scoreboard .bots b { color: var(--danger); }
+.round-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.chip.role.dodger { background: #d3f9d8; }
+.chip.role.hunter { background: #ffe3e3; }
+.district { font-weight: 600; font-size: 13px; margin: 4px 0 2px; }
+.wallet[hidden] { display: none; }
 .clock-row { display: flex; justify-content: space-between; align-items: center; }
 #clock { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .wallet { display: flex; gap: 6px; margin: 6px 0; }
@@ -90,6 +101,14 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 .toon.player::after { content: ""; position: absolute; inset: -11px; border-radius: 50%;
   border: 3px solid var(--player); animation: pulse 1.6s ease-out infinite; }
 .toon.hunter { background: var(--hunter); }
+.toon.hunter.team { background: #ffa8a8; }
+.toon.player.hunter { background: var(--hunter); }
+.toon.player.hunter::after { border-color: var(--hunter); }
+.toon.wanted { background: var(--sun); animation: wobble 0.4s ease-in-out infinite; }
+.toon.wanted::after { content: "!"; position: absolute; top: -18px; right: -10px; width: 20px;
+  height: 20px; border-radius: 50%; background: var(--hunter); color: #fff;
+  border: 2px solid var(--ink); font-size: 14px; font-weight: 700; display: grid;
+  place-items: center; }
 .toon.hunter.riding { transform: scale(0.75); }
 .toon.hunter.chasing { animation: wobble 0.25s ease-in-out infinite; }
 .toon.hunter.chasing::after { content: "!"; position: absolute; top: -18px; right: -10px;
@@ -139,6 +158,11 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 #overlay[hidden] { display: none; }
 .card { padding: 22px 28px; text-align: center; max-width: min(440px, calc(100vw - 32px));
   animation: pop 0.4s ease-out; box-shadow: 8px 8px 0 var(--ink); }
+.history { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin: 4px 0 8px; }
+.history .dot { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--ink);
+  display: grid; place-items: center; font-size: 13px; }
+.history .dot.won { background: #8ce99a; }
+.history .dot.lost { background: #ffa8a8; }
 .big-emoji { font-size: 64px; line-height: 1; animation: wobble 1s ease-in-out infinite; }
 .card h1 { margin: 6px 0 8px; font-size: 34px; }
 .card button { margin-top: 8px; padding: 10px 22px; border: 3px solid var(--ink); border-radius: 14px;

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 
 import pytest
@@ -7,14 +8,15 @@ from fastapi.testclient import TestClient
 
 from fare_dodger.config import LiveConfig, NetworkConfig
 from fare_dodger.live.bots import Agent, journey_state
-from fare_dodger.live.game import Keys, LiveGame, Status, world_view
+from fare_dodger.live.game import Keys, LiveGame, Role, Status, world_view
+from fare_dodger.live.match import District, Match, match_winner, role_for
 from fare_dodger.live.server import create_app
 from fare_dodger.live.shapes import HOPS_FILE, Hops, build_hops, cut_shape, load_or_build_hops
 from fare_dodger.live.world import World, distance
 from fare_dodger.network.timetable import Timetable
 from fare_dodger.routing.raptor import raptor
 from fare_dodger.timeutil import parse_hms
-from fare_dodger.workspace import live_config
+from fare_dodger.workspace import live_config, live_districts
 
 LIVE_TOML = Path(__file__).parents[1] / "configs" / "live.toml"
 EIGHT = parse_hms("08:00")
@@ -184,18 +186,22 @@ def test_bot_hunters_play_a_whole_game(world: World) -> None:
     assert game.status in {Status.CAUGHT, Status.ESCAPED}
 
 
-def test_server_serves_world_and_streams_snapshots(world: World) -> None:
-    client = TestClient(create_app(world, LiveConfig(seed=5)))
-    data = client.get("/api/world").json()
+def test_server_serves_districts_and_streams_a_match(world: World) -> None:
+    client = TestClient(create_app([District("Fixture", world)], LiveConfig(seed=5)))
+    data = client.get("/api/world/0").json()
     assert len(data["stations"]) == world.tt.n_nodes
-    assert data["area"]["kind"] == "circle"
+    assert data["area"]["kind"] == "circle" and data["name"] == "Fixture"
+    assert client.get("/api/world/1").status_code == 404
     assert "leaflet" in client.get("/").text
     with client.websocket_connect("/ws") as ws:
         first = ws.receive_json()
         assert first["status"] == "running" and first["player"]["state"] == "walk"
+        assert first["match"]["round"] == 1 and first["match"]["role"] == "dodger"
+        assert first["match"]["score"] == {"you": 0, "bots": 0}
         ws.send_json({"type": "keys", "up": True})
+        ws.send_json({"type": "next"})  # ignored: the round is still running
         ws.send_json({"type": "restart"})
-        assert "clock" in ws.receive_json()
+        assert ws.receive_json()["match"]["round"] == 1
 
 
 def test_cut_shape_interpolates_the_ends() -> None:
@@ -321,3 +327,95 @@ def test_cannot_pay_the_fine_is_game_over(world: World) -> None:
     game.step(1)
     assert game.status is Status.CAUGHT
     assert "fine" in (game.caught_by or "")
+
+
+def test_sides_switch_at_halftime_and_every_overtime_round() -> None:
+    d, h = Role.DODGER, Role.HUNTER
+    assert [role_for(n, 10, d) for n in range(1, 11)] == [d] * 5 + [h] * 5
+    assert [role_for(n, 10, d) for n in range(11, 15)] == [d, h, d, h]
+    assert role_for(1, 10, h) is h
+
+
+def test_match_winner_needs_six_or_a_two_round_lead_in_overtime() -> None:
+    assert match_winner(6, 4, 10, 10) is True
+    assert match_winner(1, 6, 7, 10) is False
+    assert match_winner(5, 4, 9, 10) is None
+    assert match_winner(5, 5, 10, 10) is None  # overtime
+    assert match_winner(6, 5, 11, 10) is None
+    assert match_winner(7, 5, 12, 10) is True
+    assert match_winner(6, 8, 14, 10) is False
+
+
+def finish_round(match: Match, won: bool) -> None:
+    """End the current round with the human's side winning or losing."""
+    game = match.game
+    dodger_wins = won == (game.role is Role.DODGER)
+    game.status = Status.ESCAPED if dodger_wins else Status.CAUGHT
+    match.update()
+
+
+def test_match_plays_rounds_switches_sides_and_ends(world: World) -> None:
+    districts = [District("A", world), District("B", world)]
+    match = Match(districts, LiveConfig(regulation_rounds=4), seed=3)
+    assert match.next_round() is False  # round 1 still running
+    seen = []
+    for won in (True, False, True):
+        seen.append((match.round_number, match.role, match.district))
+        finish_round(match, won)
+        assert match.view()["round_over"]
+        assert match.next_round()
+    assert [s[1] for s in seen] == [Role.DODGER, Role.DODGER, Role.HUNTER]
+    assert all(a[2] != b[2] for a, b in itertools.pairwise(seen))  # districts rotate
+    assert match.game.role is Role.HUNTER
+    finish_round(match, True)  # 3-1: first to 3 of 4
+    view = match.view()
+    assert view["winner"] == "you" and view["score"] == {"you": 3, "bots": 1}
+    assert [r["won"] for r in view["history"]] == [True, False, True, True]
+    assert match.next_round() is False
+
+
+def test_human_hunter_catches_the_dodger_on_foot(world: World) -> None:
+    game = LiveGame(world, LiveConfig(inspected_share=0.0), seed=2, role=Role.HUNTER)
+    assert game.player is not game.dodger and not game.player.pays_fares
+    assert len(game.hunters.agents) == LiveConfig().n_hunters - 1
+    assert game.snapshot()["wallet"] is None
+    game.hunters.agents = []
+    game.dodger_bot = None  # hold the Dodger still
+    game.player.pos = (game.dodger.pos[0] + 60, game.dodger.pos[1])
+    assert game.snapshot()["dodger"] is not None  # within sight
+    game.keys = Keys(left=True)
+    game.step(30)
+    assert game.status is Status.CAUGHT and game.player_won is True
+    assert game.caught_by == "You caught the Dodger!"
+
+
+def test_dodger_is_hidden_from_hunters_when_far(world: World) -> None:
+    game = LiveGame(world, LiveConfig(), seed=2, role=Role.HUNTER)
+    game.hunters.agents = []
+    game.player.pos = (game.dodger.pos[0] + 2000, game.dodger.pos[1])
+    snap = game.snapshot()
+    assert snap["dodger"] is None and snap["seen"] is False and snap["role"] == "hunter"
+
+
+def test_bot_dodger_travels_and_rounds_finish(world: World) -> None:
+    outcomes = set()
+    for seed in range(6):
+        game = LiveGame(world, LiveConfig(), seed=seed, role=Role.HUNTER)
+        start = game.dodger.pos
+        moved = False
+        while game.status is Status.RUNNING:
+            game.step(1.0)
+            moved = moved or game.dodger.pos != start
+        assert moved
+        outcomes.add(game.status)
+        assert game.player_won is (game.status is Status.CAUGHT)
+    assert Status.CAUGHT in outcomes
+
+
+def test_live_toml_districts() -> None:
+    districts = live_districts(LIVE_TOML)
+    assert len(districts) >= 4
+    assert districts[0][0] == "Inner Pest"
+    assert all(net.area.kind == "polygon" for _, net in districts)
+    assert len({net.area.model_dump_json() for _, net in districts}) == len(districts)
+    assert live_districts(None)[0][0] == "District"
