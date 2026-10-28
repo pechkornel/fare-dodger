@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from fare_dodger.config import Area
 from fare_dodger.geo import metres_per_degree
 from fare_dodger.live.shapes import Hops
+from fare_dodger.live.streets import RouteFollower, StreetGraph, along
 from fare_dodger.modes import Mode
 from fare_dodger.network.timetable import Timetable
 
@@ -83,6 +84,10 @@ class World:
         n = tt.n_nodes
         self.proj = Projection(sum(tt.node_lat) / n, sum(tt.node_lon) / n)
         self.node_xy = [self.proj.to_xy(tt.node_lat[i], tt.node_lon[i]) for i in range(n)]
+        #: Walkable streets (see :meth:`set_streets`); ``None`` means free walking.
+        self.streets: StreetGraph | None = None
+        #: Where each station meets the street (the station itself without streets).
+        self.stop_xy = list(self.node_xy)
         self.trip_pattern = [0] * tt.n_trips
         for p in range(tt.n_patterns):
             for trip in range(tt.pat_trip_ptr[p], tt.pat_trip_ptr[p + 1]):
@@ -118,6 +123,40 @@ class World:
         return self.tt.trip_arr[off : off + length], self.tt.trip_dep[off : off + length]
 
     # --- geometry --------------------------------------------------------------------------
+
+    def set_streets(self, streets: StreetGraph | None) -> None:
+        self.streets = streets
+        self.stop_xy = (
+            [streets.point(streets.snap(p)) for p in self.node_xy]
+            if streets is not None
+            else list(self.node_xy)
+        )
+
+    def stop_distance(self, p: Point, node: int) -> float:
+        """How far ``p`` is from station ``node``, or from where it meets the street."""
+        return min(distance(p, self.node_xy[node]), distance(p, self.stop_xy[node]))
+
+    def nearest_stop(self, p: Point, max_dist: float) -> int | None:
+        best, best_d = None, max_dist
+        for node in range(len(self.node_xy)):
+            d = self.stop_distance(p, node)
+            if d <= best_d:
+                best, best_d = node, d
+        return best
+
+    def walk_towards(
+        self, follower: RouteFollower, pos: Point, target: Point, max_step: float
+    ) -> Point:
+        """Walk up to ``max_step`` metres towards ``target``: along the streets, if any."""
+        if self.streets is None:
+            return step_towards(pos, target, max_step)
+        return follower.step(self.streets, pos, target, max_step)
+
+    def walk_point(self, a: int, b: int, f: float) -> Point:
+        """A fraction ``f`` of the way on foot from station ``a`` to station ``b``."""
+        if self.streets is None:
+            return lerp(self.node_xy[a], self.node_xy[b], f)
+        return along(self.streets.station_path(self.node_xy[a], self.node_xy[b], (a, b)), f)
 
     def contains(self, p: Point) -> bool:
         return self.area.contains(*self.proj.to_latlon(p))

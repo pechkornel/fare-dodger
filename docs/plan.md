@@ -195,8 +195,10 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
 - ✅ Matches: first to 6 rounds, sides switch at halftime and every overtime round (win by
   two), a playable Bounty Hunter side with a bot Dodger, and six districts in rotation
   (`feat/live-match`, ADR 0006).
-- Next: playtest and tune the bot Dodger, prices and radii per side, and polish the graphics
-  (the owner wants more). Then street walking. Multiplayer is further away.
+- ✅ Walking along OpenStreetMap streets, a slower clock (6×) with faster jogging (10 km/h), and
+  catches only on the same vehicle or with both on foot (`feat/live-streets`, ADR 0007).
+- Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and polish
+  the graphics (the owner wants more). Multiplayer is further away.
 
 ### Next (phase 1 follow-ups)
 1. Decide whether to adopt the suggested v1 rules (`reveal_modes = true`, `reveal_every = 2`)

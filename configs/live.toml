@@ -6,6 +6,9 @@
 service_date = "2026-11-17"   # same pinned Tuesday as configs/default.toml
 window_start = "07:30"
 window_end = "09:30"
+# RAPTOR's walking transfers use the live game's jogging speed, along streets (detour).
+walk_speed_kmh = 10.0
+walk_detour_factor = 1.3
 station_overrides = "station_overrides.toml"
 
 [network.area]
@@ -24,11 +27,11 @@ vertices = [
 
 [live]
 start_time = "08:00"
-duration_minutes = 30
-time_scale = 10.0            # timetable seconds per real second (30 min = 3 real minutes)
+duration_minutes = 25
+time_scale = 6.0             # timetable seconds per real second (25 min = about 4 real minutes)
 ping_every_s = 180           # the Bounty Hunters learn the Dodger's position this often
 n_hunters = 3
-walk_speed_kmh = 5.0
+walk_speed_kmh = 10.0        # a brisk jog; walking is along the streets
 catch_radius_m = 25.0        # Bounty Hunter on foot this close to an exposed Dodger
 sight_radius_m = 100.0       # Bounty Hunters on foot chase a Dodger on foot within this
 board_radius_m = 40.0        # stand this close to a stop to wait for a vehicle

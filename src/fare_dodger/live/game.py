@@ -11,10 +11,10 @@ on the next boarding. Ticket inspectors ride a hidden share of the trips. Caught
 ticket, the Dodger is put off at the next stop and held there while the fine is processed
 (and reported to the Bounty Hunters), then pays; a Dodger who cannot pay loses.
 
-The Bounty Hunters win when one of them rides the same trip as the Dodger, or is on foot
-within ``catch_radius_m`` while the Dodger is exposed: on foot (or held), or on a vehicle that
-is standing at a stop. They learn the Dodger's position every ``ping_every_s`` and see a
-Dodger who is not riding within ``sight_radius_m``. The Dodger always sees the Bounty Hunters
+The Bounty Hunters win when one of them rides the same trip as the Dodger, or when both are
+on foot (waiting at a stop and being held count as on foot) within ``catch_radius_m``. They
+learn the Dodger's position every ``ping_every_s`` and see a Dodger who is not riding within
+``sight_radius_m``. The Dodger always sees the Bounty Hunters
 and wins by lasting ``duration_minutes``.
 """
 
@@ -28,6 +28,7 @@ from typing import Any
 from fare_dodger.config import LiveConfig
 from fare_dodger.live.bots import AgentState, BountyHunters, Ping
 from fare_dodger.live.dodger_bot import BotDodger
+from fare_dodger.live.streets import EdgePos, RouteFollower
 from fare_dodger.live.world import Departure, Point, World, distance
 from fare_dodger.routing.raptor import reachable
 from fare_dodger.timeutil import format_hms
@@ -97,6 +98,9 @@ class Traveller:
     fines: int = 0
     #: Held at a stop until this time while a fine is processed.
     held_until: float | None = None
+    #: Where on the street graph, when walking on streets (``None``: snap on the next step).
+    street: EdgePos | None = None
+    follower: RouteFollower = field(default_factory=RouteFollower)
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,7 +191,7 @@ class LiveGame:
     def stop_of(self, who: Traveller) -> int | None:
         if who.ride is not None or who.held_until is not None:
             return None
-        return self.world.nearest_node(who.pos, self.cfg.board_radius_m)
+        return self.world.nearest_stop(who.pos, self.cfg.board_radius_m)
 
     def current_stop(self) -> int | None:
         return self.stop_of(self.player)
@@ -280,8 +284,10 @@ class LiveGame:
         if self.as_dodger:
             self._move(d, h, self.keys.direction(), None)
         else:
-            target = self.dodger_bot.control(self) if self.dodger_bot is not None else None
-            self._move(d, h, None, target)
+            target, direction = (
+                self.dodger_bot.control(self) if self.dodger_bot is not None else (None, None)
+            )
+            self._move(d, h, direction, target)
             self._move(self.player, h, self.keys.direction(), None)
         if self.status is not Status.RUNNING:
             return
@@ -313,19 +319,24 @@ class LiveGame:
             return
         if who.waiting_for is not None:
             dep = who.waiting_for
-            if distance(who.pos, world.node_xy[dep.node]) > self.cfg.board_radius_m:
+            if world.stop_distance(who.pos, dep.node) > self.cfg.board_radius_m:
                 who.waiting_for = None
                 self._tell(who, "info", "You left the stop.")
             elif self.t >= dep.time:
                 who.waiting_for = None
                 who.ride = Ride(dep.trip, dep.pos)
                 who.pos = world.node_xy[dep.node]
+                who.street = None
+                who.follower.reset()
                 who.rides += 1
                 self._tell(who, "board", f"You boarded {dep.route} towards {dep.headsign}.")
                 if who.pays_fares:
                     self._board(who, who.ride, dep)
                 return
         step = self.cfg.walk_speed_mps * h
+        if world.streets is not None:
+            self._walk_streets(who, step, direction, target)
+            return
         if target is not None:
             gap = distance(who.pos, target)
             if gap < 1e-9:
@@ -341,6 +352,25 @@ class LiveGame:
                 who.walked_m += distance(who.pos, candidate)
                 who.pos = candidate
                 return
+
+    def _walk_streets(
+        self, who: Traveller, step: float, direction: Point | None, target: Point | None
+    ) -> None:
+        streets = self.world.streets
+        assert streets is not None
+        old = who.pos
+        if target is not None:
+            who.pos = streets_pos = self.world.walk_towards(who.follower, who.pos, target, step)
+            who.street = None
+        else:
+            if direction is None or direction == (0.0, 0.0):
+                return
+            here = who.street
+            if here is None or distance(streets.point(here), who.pos) > 1e-6:
+                here = streets.snap(who.pos)  # e.g. after getting off: step onto the street
+            who.street = streets.move(here, direction, step)
+            who.pos = streets_pos = streets.point(who.street)
+        who.walked_m += distance(old, streets_pos)
 
     def _board(self, d: Traveller, ride: Ride, dep: Departure) -> None:
         if d.tickets > 0:
@@ -425,17 +455,14 @@ class LiveGame:
         )
 
     def _check_catch(self) -> None:
+        """A Bounty Hunter catches the Dodger on the same trip, or when both are on foot."""
         d = self.dodger
         trip = d.ride.trip if d.ride else None
-        exposed = True
-        if trip is not None:
-            state = self.world.trip_state(trip, self.t)
-            exposed = state is not None and state.at_stop
         for agent, human in self.hunter_states():
             same_trip = trip is not None and agent.trip == trip
             on_foot_close = (
-                agent.trip is None
-                and exposed
+                trip is None
+                and agent.trip is None
                 and distance(agent.pos, d.pos) <= self.cfg.catch_radius_m
             )
             if not (same_trip or on_foot_close):

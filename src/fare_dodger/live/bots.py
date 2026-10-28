@@ -13,7 +13,8 @@ import random
 from dataclasses import dataclass, field
 
 from fare_dodger.config import LiveConfig
-from fare_dodger.live.world import Point, World, distance, lerp, step_towards
+from fare_dodger.live.streets import RouteFollower
+from fare_dodger.live.world import Point, World, distance
 from fare_dodger.routing.journey import Journey, RideLeg
 from fare_dodger.routing.raptor import raptor, reachable
 
@@ -53,9 +54,8 @@ def journey_state(world: World, journey: Journey, t: float) -> AgentState:
                 state = world.trip_state(leg.trip, t)
                 pos = state.pos if state else world.node_xy[leg.to_node]
                 return AgentState(pos, leg.trip, None)
-            a, b = world.node_xy[leg.from_node], world.node_xy[leg.to_node]
             f = (t - leg.dep) / (leg.arr - leg.dep) if leg.arr > leg.dep else 1.0
-            return AgentState(lerp(a, b, f), None, None)
+            return AgentState(world.walk_point(leg.from_node, leg.to_node, f), None, None)
     dest = journey.destination
     return AgentState(world.node_xy[dest], None, dest)
 
@@ -73,6 +73,8 @@ class Agent:
     trip: int | None = field(default=None)
     #: Idle until this time (no journey found).
     idle_until: float = 0.0
+    #: Street route while chasing or walking back.
+    follower: RouteFollower = field(default_factory=RouteFollower)
 
 
 class BountyHunters:
@@ -147,16 +149,19 @@ class BountyHunters:
                 and on_foot
                 and distance(agent.pos, dodger) <= self.cfg.sight_radius_m
             ):
+                if not agent.chasing:
+                    agent.follower.reset()
                 agent.chasing, agent.plan, agent.returning_to = True, None, None
-                agent.pos = step_towards(agent.pos, dodger, step)
+                agent.pos = self.world.walk_towards(agent.follower, agent.pos, dodger, step)
                 continue
             if agent.chasing:
                 agent.chasing = False
                 nearest = self.world.nearest_node(agent.pos)
                 agent.returning_to = nearest if nearest is not None else agent.node
+                agent.follower.reset()
             if agent.returning_to is not None:
                 home = self.world.node_xy[agent.returning_to]
-                agent.pos = step_towards(agent.pos, home, step)
+                agent.pos = self.world.walk_towards(agent.follower, agent.pos, home, step)
                 if agent.pos == home:
                     agent.node, agent.returning_to = agent.returning_to, None
                     agent.needs_replan = True

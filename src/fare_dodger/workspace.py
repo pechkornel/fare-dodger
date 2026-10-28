@@ -28,6 +28,10 @@ class Workspace:
     def networks_dir(self) -> Path:
         return self.root / "networks"
 
+    @property
+    def streets_file(self) -> Path:
+        return self.root / "osm" / "streets.json"
+
     def feed_dir(self) -> tuple[Path, str]:
         """Extracted feed directory and a fingerprint identifying the feed contents."""
         zip_path = self.gtfs_dir / ZIP_NAME

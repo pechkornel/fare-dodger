@@ -212,13 +212,15 @@ class LiveConfig(_Frozen):
     """Real-time prototype: one human Dodger walking and riding against bot Bounty Hunters."""
 
     start_time: str = "08:00"
-    duration_minutes: int = Field(default=30, gt=0)
+    duration_minutes: int = Field(default=25, gt=0)
     #: Timetable seconds that pass per real second.
-    time_scale: float = Field(default=10.0, gt=0)
+    time_scale: float = Field(default=6.0, gt=0)
     #: The Bounty Hunters learn the Dodger's position this often (timetable seconds).
     ping_every_s: int = Field(default=180, gt=0)
     n_hunters: int = Field(default=3, ge=1)
-    walk_speed_kmh: float = Field(default=5.0, gt=0)
+    #: A brisk jog: faster than real walking so rounds stay short, still well below the
+    #: vehicles (and street routes are longer than the straight line).
+    walk_speed_kmh: float = Field(default=10.0, gt=0)
     #: A Bounty Hunter on foot this close to an exposed Dodger catches them.
     catch_radius_m: float = Field(default=25.0, gt=0)
     #: A Bounty Hunter on foot spots a Dodger on foot within this distance and gives chase.

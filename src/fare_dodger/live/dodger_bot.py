@@ -10,8 +10,9 @@ that:
   Bounty Hunter is on or stop near a Bounty Hunter on foot.
 * At the destination it hides a little away from the station (the Bounty Hunters search
   stations) and dwells there before moving on.
-* A Bounty Hunter on foot within ``FLEE_M`` makes it give up waiting and walk straight away,
-  unless its vehicle is about to leave; it replans once the threat is gone.
+* A Bounty Hunter on foot within ``FLEE_M`` makes it give up waiting and walk away (along the
+  streets, steering like a human), unless its vehicle is about to leave; it replans once the
+  threat is gone.
 """
 
 from __future__ import annotations
@@ -76,8 +77,14 @@ class BotDodger:
         #: Seen aboard since the current ride step began.
         self.riding = False
 
-    def control(self, game: LiveGame) -> Point | None:
-        """Act for this substep; returns the point to walk towards, if any."""
+    def control(self, game: LiveGame) -> tuple[Point | None, Point | None]:
+        """Act for this substep; returns the point to walk towards or the direction to walk
+        in (unit vector), if any."""
+        self.flee_dir: Point | None = None
+        target = self._target(game)
+        return target, self.flee_dir
+
+    def _target(self, game: LiveGame) -> Point | None:
         d, t = game.dodger, game.t
         if d.held_until is not None:
             self.steps, self.riding = [], False
@@ -95,9 +102,9 @@ class BotDodger:
             elif not self.steps:
                 self.next_plan = t + self.rng.uniform(*DWELL_S)
 
-        flee = self._flee(game)
-        if flee is not None:
-            return flee
+        self.flee_dir = self._flee(game)
+        if self.flee_dir is not None:
+            return None
         if not self.steps and t >= self.next_plan:
             self._plan(game)
         if not self.steps:
@@ -150,7 +157,7 @@ class BotDodger:
         return None
 
     def _flee(self, game: LiveGame) -> Point | None:
-        """Walk away from the closest Bounty Hunter on foot, if one is too close."""
+        """The direction away from the closest Bounty Hunter on foot, if one is too close."""
         d, t = game.dodger, game.t
         threats = [s.pos for s, _ in game.hunter_states() if s.trip is None]
         if not threats:
@@ -169,7 +176,7 @@ class BotDodger:
             away = (math.cos(angle), math.sin(angle))
         else:
             away = ((d.pos[0] - near[0]) / gap, (d.pos[1] - near[1]) / gap)
-        return d.pos[0] + away[0] * 50, d.pos[1] + away[1] * 50
+        return away
 
     def _plan(self, game: LiveGame) -> None:
         t = game.t
@@ -234,5 +241,6 @@ class BotDodger:
             r = self.rng.uniform(*HIDE_M)
             spot = (station[0] + r * math.cos(angle), station[1] + r * math.sin(angle))
             if self.world.contains(spot):
-                return spot
+                streets = self.world.streets
+                return spot if streets is None else streets.point(streets.snap(spot))
         return station

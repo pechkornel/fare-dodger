@@ -20,6 +20,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   5-5 sides switch every round until one team leads by two. You can now play a Bounty Hunter
   hunting a bot Dodger. Each round is on one of six Budapest districts (`[[district]]` in
   `configs/live.toml`). ADR 0006.
+- Live game: walking follows real OpenStreetMap streets (downloaded once; `--free-walk` to
+  skip), for you and the bots. Time runs at 6× instead of 10× (rounds are about 4 minutes),
+  and characters jog at 10 km/h. Bounty Hunters now catch you only on the same vehicle or when
+  you are both on foot. ADR 0007.
 
 ## [0.1.0] - 2026-10-28
 
