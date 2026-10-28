@@ -44,13 +44,28 @@ uv run fare-dodger sim --dodger greedy --inspectors belief --rule reveal_modes=t
 uv run fare-dodger play --open         # http://127.0.0.1:8000/ (uses configs/live.toml)
 ```
 
-A real-time version on an inner-Pest district (VII–VIII), drawn on OpenStreetMap tiles. You
-are the Dodger: walk with **WASD**, stand at a stop and press **E** (or **1–6** to pick a
-departure) to wait for a real tram, trolleybus, bus or metro, and press **E** again to get off
-at the next stop. Three bot Inspectors learn your position every 3 timetable minutes, chase
-you on sight, and catch you on foot, at a stop, or on the same vehicle. Survive 30 timetable
-minutes (3 real minutes at 10× speed) to win. See
-[ADR 0005](docs/decisions/0005-live-prototype.md).
+A fast, cartoony real-time game on real timetables, played as a **match** against bots,
+CS-style.
+- **Rounds:** each round lasts 3 real minutes and is played on a different Budapest district
+  (six on both banks of the Danube).
+- **Winning the match:** the first team to win 6 rounds takes it. You play the Dodger for
+  rounds 1–5 and a Bounty Hunter for rounds 6–10. At 5-5, sides switch every round until one
+  team leads by two.
+- **Controls:** walk with **WASD**. Stand at a stop and press **E** (or **1–6** to pick a
+  departure) to wait for a real tram, trolleybus, bus or metro. Press **E** again to get off at
+  the next stop. **Enter** starts the next round.
+- **As the Dodger:** survive. Buy a ticket at a stop with **T** (450 Ft of your 2,000 Ft), or
+  *bliccel* and ride without one.
+  - Ticket inspectors ride about 35% of the trips, and you only find out once you are aboard.
+  - Without a ticket, you are put off at the next stop and held while the fine is written,
+    and the Bounty Hunters are told where you are. If you can't pay, you lose the round.
+  - Three Bounty Hunters learn your position every 3 timetable minutes, chase you on sight,
+    and catch you on foot, at a stop, or on the same vehicle.
+- **As a Bounty Hunter:** hunt the bot Dodger with two bot teammates. You see the Dodger only
+  up close or through the reports.
+
+See [ADR 0005](docs/decisions/0005-live-prototype.md) and
+[ADR 0006](docs/decisions/0006-live-matches.md).
 
 Every command takes `-c configs/default.toml`, which documents every network and rule
 setting. `--rule key=value` overrides a single rule for a simulation. The config pins the

@@ -46,3 +46,36 @@ walking is acceptable for now; walking along streets comes later.
 - OpenStreetMap's public tiles are fine for local play, but a public deployment needs
   another tile provider (`tile_url` in `configs/live.toml`).
 - The balance numbers from the round-based simulations do not carry over directly.
+
+## Addendum (2026-10-28): GTFS shapes for vehicle paths
+Vehicles now follow their real route geometry. Each hop of a pattern (two consecutive
+stations) gets the part of its first trip's GTFS shape between the two stops, cut by
+`shape_dist_traveled` (`live/shapes.py`). The path runs from the merged station's centre to
+the platform's point on the shape, along the shape, and on to the next station's centre, at
+constant speed per hop. Hops without shape data, or whose cut is longer than 3× the straight
+distance plus 300 m, stay straight lines. The route lines on the map use the same paths.
+
+On the live district every one of the 193 hops has a shape. The longest detour is 2.4× the
+straight distance, where trolleybus 76 loops around Keleti pályaudvar. The paths are built in
+about 0.5 s on the first `play` and cached as `hops.json` next to the network. The network
+build, RAPTOR and the round-based game are unchanged. Inspectors walking between stations
+still move in straight lines.
+
+## Addendum (2026-10-28): Bounty Hunters, tickets and a cartoon look
+The owner asked for a more cartoony game with ticket inspectors on some vehicles, a new name
+for the chasers, and a choice between buying a ticket and riding without one.
+- **Bounty Hunters.** The bots on foot are now called Bounty Hunters (`BountyHunters`,
+  `n_hunters`). Their behaviour is unchanged, and a ticket does not protect against them.
+  The round-based phase 1 engine keeps the name Inspectors.
+- **Tickets.** The Dodger starts with `start_money_ft` (2,000 Ft) and can buy single tickets
+  (`ticket_price_ft`, 450 Ft) at any stop. A ticket is used automatically on the next boarding.
+- **Ticket inspectors.** A seeded `inspected_share` (35%) of trips carry inspectors. They are
+  not shown on the map, so riding without a ticket is a real gamble: about one ride in three.
+  On boarding an inspected trip without a ticket, the Dodger is put off at the next stop and
+  held for `fine_hold_s` (60 timetable seconds) while the fine is written. The position is
+  reported to the Bounty Hunters (`fine_alerts_hunters`), and then `fine_ft` (1,000 Ft) is
+  paid. A Dodger who cannot pay the fine loses at once.
+- **Look.** The client uses the Fredoka font, cream panels with thick outlines and hard
+  shadows, emoji characters (🏃 Dodger, 🤠 Bounty Hunters), vehicle badges per mode, tinted
+  OpenStreetMap tiles, and a "KONTROLL!" burst on inspections. Motion respects
+  `prefers-reduced-motion`. CARTO's styled tiles were tried, but they now need an API key.

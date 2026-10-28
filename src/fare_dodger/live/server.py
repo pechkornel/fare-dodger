@@ -1,15 +1,19 @@
 """HTTP + WebSocket server for the live game.
 
 The server owns the game state (authoritative, so multiplayer can be added later). Each
-WebSocket connection is one single-player game: the browser sends key state and actions,
-and the server advances the game in real time and sends a snapshot ~20 times a second.
+WebSocket connection plays one match against the bots: the browser sends key state and
+actions, and the server advances the current round in real time and sends a snapshot ~20
+times a second, with the match state under ``"match"``. Static map data for district ``i``
+is served at ``/api/world/{i}``.
 
 Client messages::
 
     {"type": "keys", "up": bool, "down": bool, "left": bool, "right": bool}
     {"type": "use"}                 # board / get off / stop waiting
     {"type": "wait", "index": int}  # wait for a listed departure
-    {"type": "restart"}
+    {"type": "ticket"}              # buy a ticket at the current stop
+    {"type": "next"}                # start the next round once this one is over
+    {"type": "restart"}             # start a new match
 """
 
 from __future__ import annotations
@@ -20,12 +24,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from fare_dodger.config import LiveConfig
 from fare_dodger.live.game import Keys, LiveGame, world_view
-from fare_dodger.live.world import World
+from fare_dodger.live.match import District, Match
 
 STATIC_DIR = Path(__file__).parent / "static"
 TICK_S = 0.05
@@ -44,46 +48,56 @@ def apply_message(game: LiveGame, msg: dict[str, Any]) -> None:
         )
     elif kind == "use":
         game.use()
+    elif kind == "ticket":
+        game.buy_ticket()
     elif kind == "wait":
         index = msg.get("index")
         if isinstance(index, int):
             game.wait_for(index)
 
 
-def create_app(world: World, cfg: LiveConfig) -> FastAPI:
+def create_app(districts: list[District], cfg: LiveConfig) -> FastAPI:
     app = FastAPI(title="Fare Dodger live", docs_url=None, redoc_url=None)
-    world_json = world_view(world, cfg)
+    views = [{**world_view(d.world, cfg), "name": d.name} for d in districts]
 
-    def new_game() -> LiveGame:
+    def new_match() -> Match:
         seed = cfg.seed if cfg.seed is not None else random.randrange(2**31)
-        return LiveGame(world, cfg, seed)
+        return Match(districts, cfg, seed)
 
-    @app.get("/api/world")
-    def get_world() -> dict[str, Any]:
-        return world_json
+    @app.get("/api/world/{index}")
+    def get_world(index: int) -> dict[str, Any]:
+        if not 0 <= index < len(views):
+            raise HTTPException(status_code=404, detail="no such district")
+        return views[index]
 
     @app.websocket("/ws")
     async def play(ws: WebSocket) -> None:
         await ws.accept()
-        current = [new_game()]
+        current = [new_match()]
 
         async def read() -> None:
             while True:
                 msg = await ws.receive_json()
-                if isinstance(msg, dict):
-                    if msg.get("type") == "restart":
-                        current[0] = new_game()
-                    else:
-                        apply_message(current[0], msg)
+                if not isinstance(msg, dict):
+                    continue
+                kind = msg.get("type")
+                if kind == "restart":
+                    current[0] = new_match()
+                elif kind == "next":
+                    current[0].next_round()
+                else:
+                    apply_message(current[0].game, msg)
 
         reader = asyncio.create_task(read())
         last = time.monotonic()
         try:
             while not reader.done():
                 now = time.monotonic()
-                current[0].step(min(now - last, MAX_TICK_S) * cfg.time_scale)
+                match = current[0]
+                match.game.step(min(now - last, MAX_TICK_S) * cfg.time_scale)
+                match.update()
                 last = now
-                await ws.send_json(current[0].snapshot())
+                await ws.send_json({**match.game.snapshot(), "match": match.view()})
                 await asyncio.sleep(TICK_S)
         except WebSocketDisconnect:
             pass

@@ -7,7 +7,8 @@ from pathlib import Path
 
 from fare_dodger.config import LiveConfig, NetworkConfig, RulesConfig, data_dir, load_toml
 from fare_dodger.gtfs.download import ZIP_NAME, extract_feed, read_meta
-from fare_dodger.network.build import load_or_build
+from fare_dodger.live.shapes import Hops, load_or_build_hops
+from fare_dodger.network.build import cache_key, load_or_build
 from fare_dodger.network.timetable import Timetable
 
 
@@ -41,6 +42,11 @@ class Workspace:
         feed_dir, fingerprint = self.feed_dir()
         return load_or_build(feed_dir, cfg, self.networks_dir, fingerprint, rebuild=rebuild)
 
+    def vehicle_paths(self, cfg: NetworkConfig, tt: Timetable) -> Hops:
+        """GTFS shape paths of the hops of ``tt`` (the network built for ``cfg``), cached."""
+        feed_dir, fingerprint = self.feed_dir()
+        return load_or_build_hops(feed_dir, tt, self.networks_dir / cache_key(fingerprint, cfg))
+
 
 def network_config(path: Path | None) -> NetworkConfig:
     """``[network]`` section of a TOML file, or the defaults.
@@ -57,6 +63,28 @@ def network_config(path: Path | None) -> NetworkConfig:
         inline = section.get("station_merge_overrides", {})
         section["station_merge_overrides"] = {**merges, **inline}
     return NetworkConfig.model_validate(section)
+
+
+def live_districts(path: Path | None) -> list[tuple[str, NetworkConfig]]:
+    """The live game's districts: each ``[[district]]`` table (``name`` and polygon
+    ``vertices``) on top of the ``[network]`` section, or that section alone if there are none.
+    """
+    base = network_config(path)
+    tables = load_toml(path).get("district", []) if path is not None else []
+    if not tables:
+        return [("District", base)]
+    return [
+        (
+            str(table["name"]),
+            NetworkConfig.model_validate(
+                {
+                    **base.model_dump(),
+                    "area": {"kind": "polygon", "vertices": table["vertices"]},
+                }
+            ),
+        )
+        for table in tables
+    ]
 
 
 def rules_config(path: Path | None) -> RulesConfig:

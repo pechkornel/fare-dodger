@@ -1,5 +1,6 @@
-# Live (real-time) prototype: a small inner-Pest district on real timetables.
-# Run with `uv run fare-dodger play`. Network keys not listed here use the code defaults.
+# Live (real-time) game: matches of short rounds, each on a different Budapest district, on
+# real timetables. Run with `uv run fare-dodger play`. Network keys not listed here use the
+# code defaults; each [[district]] below replaces [network.area] with its own polygon.
 
 [network]
 service_date = "2026-11-17"   # same pinned Tuesday as configs/default.toml
@@ -25,14 +26,71 @@ vertices = [
 start_time = "08:00"
 duration_minutes = 30
 time_scale = 10.0            # timetable seconds per real second (30 min = 3 real minutes)
-ping_every_s = 180           # the Inspectors learn the Dodger's position this often
-n_inspectors = 3
+ping_every_s = 180           # the Bounty Hunters learn the Dodger's position this often
+n_hunters = 3
 walk_speed_kmh = 5.0
-catch_radius_m = 25.0        # Inspector on foot this close to an exposed Dodger
-sight_radius_m = 100.0       # Inspectors on foot chase a Dodger on foot within this
+catch_radius_m = 25.0        # Bounty Hunter on foot this close to an exposed Dodger
+sight_radius_m = 100.0       # Bounty Hunters on foot chase a Dodger on foot within this
 board_radius_m = 40.0        # stand this close to a stop to wait for a vehicle
 min_start_distance_min = 8
+# Tickets and fares. Buy a ticket at a stop (T), or ride without one and risk an inspection.
+start_money_ft = 2000
+ticket_price_ft = 450
+inspected_share = 0.35       # trips with ticket inspectors aboard (hidden until you board)
+fine_ft = 1000               # caught without a ticket; game over if you cannot pay
+fine_hold_s = 60             # held at the next stop while the fine is processed
+fine_alerts_hunters = true   # the inspectors report you to the Bounty Hunters
+# Match: first to win more than half of the regulation rounds (6 of 10); sides switch at
+# halftime; at 5-5, sides switch every round until one team leads by two.
+regulation_rounds = 10
+start_role = "dodger"
 # OpenStreetMap's tile servers are fine for local play; use another tile provider for any
-# public deployment (https://operations.osmfoundation.org/policies/tiles/).
+# public deployment (https://operations.osmfoundation.org/policies/tiles/). The client tints
+# the tiles for the cartoon look.
 tile_url = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 tile_attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+
+# Districts, one per round in a shuffled order. Each stays on one bank of the Danube, with a
+# margin from the river, because walking is free inside the polygon.
+[[district]]
+name = "Inner Pest"
+vertices = [
+  [47.4979, 19.0544], [47.5054, 19.0630], [47.5008, 19.0845],
+  [47.4788, 19.0912], [47.4810, 19.0656], [47.4866, 19.0585],
+]
+
+[[district]]
+name = "Lipótváros & Terézváros"
+vertices = [
+  [47.5125, 19.0505], [47.5148, 19.0640], [47.5072, 19.0738], [47.4995, 19.0600],
+  [47.4968, 19.0510], [47.5005, 19.0478], [47.5075, 19.0465],
+]
+
+[[district]]
+name = "Buda: Castle & Gellért"
+vertices = [
+  [47.5080, 19.0225], [47.5108, 19.0335], [47.5065, 19.0390], [47.4990, 19.0405],
+  [47.4912, 19.0440], [47.4850, 19.0488], [47.4790, 19.0535], [47.4735, 19.0545],
+  [47.4715, 19.0420], [47.4800, 19.0280], [47.4960, 19.0195],
+]
+
+[[district]]
+name = "Újlipótváros & Angyalföld"
+vertices = [
+  [47.5140, 19.0525], [47.5230, 19.0590], [47.5320, 19.0650],
+  [47.5345, 19.0775], [47.5225, 19.0820], [47.5125, 19.0720],
+]
+
+[[district]]
+name = "Ferencváros & Józsefváros"
+vertices = [
+  [47.4868, 19.0605], [47.4885, 19.0760], [47.4800, 19.0960],
+  [47.4675, 19.0905], [47.4690, 19.0765], [47.4790, 19.0665],
+]
+
+[[district]]
+name = "Városliget & Zugló"
+vertices = [
+  [47.5072, 19.0740], [47.5170, 19.0820], [47.5190, 19.1010],
+  [47.5080, 19.1100], [47.4990, 19.0900], [47.5010, 19.0800],
+]

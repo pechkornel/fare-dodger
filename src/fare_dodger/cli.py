@@ -20,6 +20,7 @@ from fare_dodger.bots import DODGER_BOTS, INSPECTOR_BOTS
 from fare_dodger.config import NetworkConfig, RulesConfig
 from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
+from fare_dodger.live.match import District
 from fare_dodger.live.server import create_app
 from fare_dodger.live.world import World
 from fare_dodger.modes import VEHICLE_MODES
@@ -28,7 +29,13 @@ from fare_dodger.routing.raptor import reachable
 from fare_dodger.sim.report import rules_summary, summarise, write_reports
 from fare_dodger.sim.runner import run_matchups
 from fare_dodger.timeutil import format_hm, parse_hms
-from fare_dodger.workspace import Workspace, live_config, network_config, rules_config
+from fare_dodger.workspace import (
+    Workspace,
+    live_config,
+    live_districts,
+    network_config,
+    rules_config,
+)
 
 app = typer.Typer(
     name="fare-dodger",
@@ -294,15 +301,26 @@ def play(
         bool, typer.Option("--open", help="Open the game in a browser")
     ] = False,
 ) -> None:
-    """Play the live prototype in the browser: walk with WASD, ride real trams and buses."""
-    net = network_config(config)
+    """Play the live game in the browser: a match of rounds on Budapest districts, as the
+    Dodger and as a Bounty Hunter. Walk with WASD, ride real trams and buses."""
     cfg = live_config(config)
     if seed is not None:
         cfg = cfg.model_copy(update={"seed": seed})
-    tt = _open_network(config, data)
-    app_ = create_app(World(tt, net.area), cfg)
+    workspace = Workspace.at(data)
+    districts = []
+    for name, net in live_districts(config):
+        started = time.perf_counter()
+        tt, _, _ = workspace.network(net)
+        hops = workspace.vehicle_paths(net, tt)
+        districts.append(District(name, World(tt, net.area, hops)))
+        typer.echo(
+            f"  {name}: {tt.n_nodes} stations, {tt.n_patterns} patterns "
+            f"({time.perf_counter() - started:.1f}s)",
+            err=True,
+        )
+    app_ = create_app(districts, cfg)
     url = f"http://{host}:{port}/"
-    typer.echo(f"Fare Dodger live: {tt.n_nodes} stations. Open {url} (Ctrl+C to stop)")
+    typer.echo(f"Fare Dodger live: {len(districts)} districts. Open {url} (Ctrl+C to stop)")
     if open_browser:
         webbrowser.open(url)
     uvicorn.run(app_, host=host, port=port, log_level="warning")

@@ -209,25 +209,42 @@ class RulesConfig(_Frozen):
 
 
 class LiveConfig(_Frozen):
-    """Real-time prototype: one human Dodger walking and riding against bot Inspectors."""
+    """Real-time prototype: one human Dodger walking and riding against bot Bounty Hunters."""
 
     start_time: str = "08:00"
     duration_minutes: int = Field(default=30, gt=0)
     #: Timetable seconds that pass per real second.
     time_scale: float = Field(default=10.0, gt=0)
-    #: The Inspectors learn the Dodger's position this often (timetable seconds).
+    #: The Bounty Hunters learn the Dodger's position this often (timetable seconds).
     ping_every_s: int = Field(default=180, gt=0)
-    n_inspectors: int = Field(default=3, ge=1)
+    n_hunters: int = Field(default=3, ge=1)
     walk_speed_kmh: float = Field(default=5.0, gt=0)
-    #: An Inspector on foot this close to an exposed Dodger catches them.
+    #: A Bounty Hunter on foot this close to an exposed Dodger catches them.
     catch_radius_m: float = Field(default=25.0, gt=0)
-    #: An Inspector on foot spots a Dodger on foot within this distance and gives chase.
+    #: A Bounty Hunter on foot spots a Dodger on foot within this distance and gives chase.
     sight_radius_m: float = Field(default=100.0, ge=0)
     #: How close to a stop the Dodger must stand to wait for and board a vehicle.
     board_radius_m: float = Field(default=40.0, gt=0)
-    #: Minimum travel time (minutes) from every Inspector to the Dodger at the start.
+    #: Minimum travel time (minutes) from every Bounty Hunter to the Dodger at the start.
     min_start_distance_min: int = Field(default=8, ge=0)
-    #: Fixed seed for reproducible games; ``None`` picks a new one per game.
+    #: Money (forints) at the start; a single ticket covers one ride and is used on boarding.
+    start_money_ft: int = Field(default=2000, ge=0)
+    ticket_price_ft: int = Field(default=450, ge=0)
+    #: Share of trips with ticket inspectors aboard; nobody knows which until they board.
+    inspected_share: float = Field(default=0.35, ge=0, le=1)
+    #: Caught without a ticket: put off at the next stop and held there this long (timetable
+    #: seconds) while the fine is processed. Game over if the Dodger cannot pay.
+    fine_ft: int = Field(default=1000, ge=0)
+    fine_hold_s: int = Field(default=60, ge=0)
+    #: The inspectors report a fined Dodger's position to the Bounty Hunters.
+    fine_alerts_hunters: bool = True
+    #: Match: the first side to win more than half of ``regulation_rounds`` takes the match.
+    #: Sides switch after half of them; at a tie after regulation, sides switch every round
+    #: until one team leads by two.
+    regulation_rounds: int = Field(default=10, ge=2, multiple_of=2)
+    #: The human's side in the first round.
+    start_role: Literal["dodger", "hunter"] = "dodger"
+    #: Fixed seed for reproducible matches; ``None`` picks a new one per match.
     seed: int | None = None
     tile_url: str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
     tile_attribution: str = (

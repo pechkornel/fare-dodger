@@ -11,6 +11,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
   district. Walk with WASD, wait for and ride real trips, and avoid bot Inspectors who are pinged
   your position every 3 minutes. FastAPI WebSocket server, Leaflet client on OpenStreetMap tiles,
   `configs/live.toml`; ADR 0005.
+- Live game: vehicles follow their GTFS shapes between stops instead of straight lines, and
+  the map draws route lines along the same paths (cached as `hops.json`).
+- Live game: tickets (buy at a stop with T, or ride without one), hidden ticket inspectors on
+  35% of trips, and fines that hold you at the next stop and alert the chasers. The chasers are
+  now called Bounty Hunters (`n_hunters`). The client has a cartoon look.
+- Live game: matches against bots. First to 6 rounds wins, sides switch at halftime, and at
+  5-5 sides switch every round until one team leads by two. You can now play a Bounty Hunter
+  hunting a bot Dodger. Each round is on one of six Budapest districts (`[[district]]` in
+  `configs/live.toml`). ADR 0006.
 
 ## [0.1.0] - 2026-10-28
 
