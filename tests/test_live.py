@@ -455,3 +455,45 @@ def test_smooth_path_drops_spikes_and_jitter_but_keeps_the_stops() -> None:
     corner = smooth_path([(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)])
     assert corner[0] == (0.0, 0.0) and corner[-1] == (100.0, 100.0)
     assert (100.0, 0.0) not in corner and len(corner) > 3
+
+
+def test_server_starts_on_the_side_picked_in_the_menu_after_a_countdown(world: World) -> None:
+    client = TestClient(create_app([District("Fixture", world)], LiveConfig(seed=5)))
+    with client.websocket_connect("/ws?role=hunter") as ws:
+        first = ws.receive_json()
+        assert first["match"]["role"] == "hunter" and first["role"] == "hunter"
+        assert 0 < first["freeze_s"] <= LiveConfig().freeze_s
+        ws.send_json({"type": "use"})  # ignored during the countdown
+        assert ws.receive_json()["t"] == first["t"]  # the clock waits too
+    with client.websocket_connect("/ws?role=nonsense") as ws:
+        assert ws.receive_json()["match"]["role"] == "dodger"  # the configured default
+
+
+def test_vehicles_report_their_heading(world: World) -> None:
+    trip = m1_east_at_eight(world)
+    standing = world.trip_state(trip, EIGHT)
+    moving = world.trip_state(trip, EIGHT + 60)
+    assert standing is not None and moving is not None
+    assert standing.heading == pytest.approx(0.0, abs=0.05)  # M1 runs (nearly) due east
+    assert moving.heading == pytest.approx(0.0, abs=0.05)
+    game = solo_game(world, "West")
+    row = next(v for v in game.snapshot()["vehicles"] if v[0] == trip)
+    assert len(row) == 6 and row[5] == pytest.approx(standing.heading, abs=1e-3)
+
+
+def test_asking_to_get_off_can_be_cancelled(world: World) -> None:
+    game = solo_game(world, "West")
+    game.wait_for(0)
+    game.step(30)
+    game.use()  # get off at Central
+    assert game.snapshot()["ride"]["alight_at"] == "Central"
+    game.use()  # no, stay on
+    assert game.snapshot()["ride"]["alight_at"] is None
+    game.step(220)  # past Central, on to the end of the line at East
+    assert game.dodger.ride is None
+    assert game.dodger.pos == world.node_xy[node(world, "East")]
+
+
+def test_bounty_hunters_outnumber_the_dodger_by_two() -> None:
+    assert LiveConfig().n_hunters == 3
+    assert LiveConfig(hunter_extra=4).n_hunters == 5

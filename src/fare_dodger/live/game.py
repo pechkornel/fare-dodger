@@ -38,6 +38,10 @@ DEPARTURE_HORIZON_S = 15 * 60
 DEPARTURE_LIMIT = 6
 #: Movement and catches are evaluated at least this often (timetable seconds).
 MAX_SUBSTEP_S = 1.0
+#: Leaving a park, a street this close is stepped onto (metres).
+PARK_EXIT_M = 15.0
+#: Open ground this far ahead (across a pavement) can be walked onto (metres).
+PARK_ENTER_M = 12.0
 
 
 class Status(StrEnum):
@@ -275,6 +279,10 @@ class LiveGame:
             if p.ride.fined:
                 self._emit("info", "The inspectors are taking you off at the next stop.")
                 return
+            if p.ride.alight_pos is not None:  # changed your mind: stay on
+                p.ride.alight_pos = None
+                self._emit("info", "You stay on.")
+                return
             self._request_alight(p.ride)
         elif p.waiting_for is not None:
             p.waiting_for = None
@@ -418,12 +426,44 @@ class LiveGame:
         else:
             if direction is None or direction == (0.0, 0.0):
                 return
+            if self._walk_open_ground(who, step, direction):
+                who.walked_m += distance(old, who.pos)
+                return
             here = who.street
             if here is None or distance(streets.point(here), who.pos) > 1e-6:
                 here = streets.snap(who.pos)  # e.g. after getting off: step onto the street
             who.street = streets.move(here, direction, step)
             who.pos = streets_pos = streets.point(who.street)
         who.walked_m += distance(old, streets_pos)
+
+    def _walk_open_ground(self, who: Traveller, step: float, direction: Point) -> bool:
+        """Walk freely across parks and squares. Returns ``False`` to walk on the streets
+        instead: when the way ahead is not open ground and a street is close by."""
+        parks, streets, world = self.world.parks, self.world.streets, self.world
+        if parks is None or streets is None:
+            return False
+        x, y = who.pos
+        dx, dy = direction
+
+        def open_ground(p: Point) -> bool:
+            return parks.contains(p) and world.contains(p)
+
+        straight = (x + dx * step, y + dy * step)
+        # Parks usually start a few metres off the street: head for one just ahead too.
+        probe = (x + dx * PARK_ENTER_M, y + dy * PARK_ENTER_M)
+        if open_ground(straight) or (open_ground(probe) and world.contains(straight)):
+            who.pos, who.street = straight, None
+            return True
+        if who.street is not None or not parks.contains(who.pos):
+            return False  # on a street: keep to the streets
+        # In a park, facing its edge: step onto a street close by, or slide along the edge.
+        if distance(streets.point(streets.snap(who.pos)), who.pos) <= PARK_EXIT_M:
+            return False
+        for slide in ((x + dx * step, y), (x, y + dy * step)):
+            if slide != who.pos and open_ground(slide):
+                who.pos = slide
+                return True
+        return True  # stuck at the edge, with no street nearby
 
     def _board(self, d: Traveller, ride: Ride, dep: Departure) -> None:
         if d.tickets > 0:
@@ -640,7 +680,13 @@ class LiveGame:
                 else None
             ),
             "vehicles": [
-                [s.trip, *self._latlon(s.pos), world.mode(s.trip).value, world.route(s.trip)]
+                [
+                    s.trip,
+                    *self._latlon(s.pos),
+                    world.mode(s.trip).value,
+                    world.route(s.trip),
+                    round(s.heading, 3),
+                ]
                 for s in world.active_trips(t)
             ],
             "ping": (

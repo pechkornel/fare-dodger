@@ -63,9 +63,12 @@ def create_app(districts: list[District], cfg: LiveConfig) -> FastAPI:
     app = FastAPI(title="Fare Dodger live", docs_url=None, redoc_url=None)
     views = [{**world_view(d.world, cfg), "name": d.name} for d in districts]
 
-    def new_match() -> Match:
+    def new_match(start_role: str | None = None) -> Match:
         seed = cfg.seed if cfg.seed is not None else random.randrange(2**31)
-        return Match(districts, cfg, seed)
+        match_cfg = cfg
+        if start_role in ("dodger", "hunter"):
+            match_cfg = cfg.model_copy(update={"start_role": start_role})
+        return Match(districts, match_cfg, seed)
 
     @app.get("/api/world/{index}")
     def get_world(index: int) -> dict[str, Any]:
@@ -76,7 +79,15 @@ def create_app(districts: list[District], cfg: LiveConfig) -> FastAPI:
     @app.websocket("/ws")
     async def play(ws: WebSocket) -> None:
         await ws.accept()
-        current = [new_match()]
+        # The main menu picks the side to start on: /ws?role=dodger or /ws?role=hunter.
+        start_role = ws.query_params.get("role")
+        current = [new_match(start_role)]
+        # Each round starts with a short countdown (real seconds) while nobody can move.
+        frozen_game: list[LiveGame | None] = [None]
+        frozen_until = [0.0]
+
+        def frozen() -> bool:
+            return time.monotonic() < frozen_until[0]
 
         async def read() -> None:
             while True:
@@ -85,10 +96,10 @@ def create_app(districts: list[District], cfg: LiveConfig) -> FastAPI:
                     continue
                 kind = msg.get("type")
                 if kind == "restart":
-                    current[0] = new_match()
+                    current[0] = new_match(start_role)
                 elif kind == "next":
                     current[0].next_round()
-                else:
+                elif kind == "keys" or not frozen():
                     apply_message(current[0].game, msg)
 
         reader = asyncio.create_task(read())
@@ -97,10 +108,19 @@ def create_app(districts: list[District], cfg: LiveConfig) -> FastAPI:
             while not reader.done():
                 now = time.monotonic()
                 match = current[0]
-                match.game.step(min(now - last, MAX_TICK_S) * cfg.time_scale)
+                if frozen_game[0] is not match.game:
+                    frozen_game[0], frozen_until[0] = match.game, now + cfg.freeze_s
+                if not frozen():
+                    match.game.step(min(now - last, MAX_TICK_S) * cfg.time_scale)
                 match.update()
                 last = now
-                await ws.send_json({**match.game.snapshot(), "match": match.view()})
+                await ws.send_json(
+                    {
+                        **match.game.snapshot(),
+                        "match": match.view(),
+                        "freeze_s": round(max(0.0, frozen_until[0] - now), 2),
+                    }
+                )
                 await asyncio.sleep(TICK_S)
         except WebSocketDisconnect:
             pass

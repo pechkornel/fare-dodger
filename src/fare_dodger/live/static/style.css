@@ -128,7 +128,7 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
   100% { transform: scale(1); } }
 
 /* Feed: speech bubbles */
-#feed { position: absolute; top: 12px; right: 12px; z-index: 1000; width: 310px;
+#feed { position: absolute; top: 248px; right: 12px; z-index: 1000; width: 310px;
   max-width: calc(100vw - 24px); display: flex; flex-direction: column; gap: 8px;
   pointer-events: none; }
 .toast { background: #fff; border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
@@ -176,6 +176,93 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
   cursor: pointer; box-shadow: var(--shadow); }
 .card button:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
 
+/* --- top bar: score and round timer ---------------------------------------------------- */
+#topbar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1000;
+  display: flex; align-items: center; gap: 14px; padding: 4px 16px; font-weight: 600; }
+#topbar[hidden] { display: none; }
+#topbar .team { font-size: 16px; }
+#topbar .team b { font-size: 28px; font-variant-numeric: tabular-nums; }
+#topbar .you b { color: var(--ok); }
+#topbar .bots b { color: var(--danger); }
+#topbar .timer { display: flex; flex-direction: column; align-items: center; min-width: 96px;
+  padding: 2px 12px; border-radius: 12px; background: var(--ink); color: var(--paper); }
+#topbar .timer b { font-size: 30px; line-height: 1.05; font-variant-numeric: tabular-nums; }
+#topbar .timer small { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase;
+  opacity: 0.8; }
+#topbar .timer.low b { color: #ff8787; animation: bump 1s ease-in-out infinite; }
+
+/* --- round countdown ---------------------------------------------------------------- */
+#countdown { position: absolute; inset: 0; z-index: 1600; display: grid; place-content: center;
+  justify-items: center; pointer-events: none; background: rgba(43, 33, 24, 0.25); }
+#countdown[hidden] { display: none; }
+#countdown .number { font-size: 140px; font-weight: 700; line-height: 1; color: var(--sun);
+  -webkit-text-stroke: 5px var(--ink); text-shadow: 8px 8px 0 var(--ink);
+  animation: pop 0.35s ease-out; }
+#countdown .what { margin-top: 12px; padding: 8px 18px; border: 3px solid var(--ink);
+  border-radius: 14px; background: var(--paper); box-shadow: var(--shadow); font-size: 20px;
+  font-weight: 700; }
+
+/* --- minimap ---------------------------------------------------------------------- */
+#minimap { position: absolute; top: 12px; right: 12px; z-index: 1000; width: 220px;
+  height: 220px; padding: 0; background: var(--paper); }
+#minimap[hidden] { display: none; }
+
+/* --- arrow towards the latest report (Bounty Hunters) ------------------------------- */
+#ping-arrow { position: absolute; z-index: 1100; display: flex; flex-direction: column;
+  align-items: center; gap: 2px; transform: translate(-50%, -50%); pointer-events: none; }
+#ping-arrow[hidden] { display: none; }
+#ping-arrow .arrow { display: grid; place-items: center; width: 46px; height: 46px;
+  border-radius: 50%; background: var(--hunter); color: #fff; font-size: 24px;
+  border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+  animation: bump 1.2s ease-in-out infinite; }
+#ping-arrow .arrow i { font-style: normal; display: block; line-height: 1; }
+#ping-arrow #ping-dist { padding: 1px 8px; border: 2px solid var(--ink); border-radius: 999px;
+  background: #fff; font-size: 13px; font-weight: 700; }
+
+/* --- get on / get off switch ---------------------------------------------------------- */
+#ride-toggle { position: absolute; right: 16px; bottom: 24px; z-index: 1100; display: flex;
+  align-items: center; gap: 12px; padding: 10px 16px 10px 12px; border: 3px solid var(--ink);
+  border-radius: 20px; background: var(--paper); box-shadow: var(--shadow); font: inherit;
+  cursor: pointer; text-align: left; min-width: 230px; }
+#ride-toggle[hidden] { display: none; }
+#ride-toggle:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
+#ride-toggle .track { position: relative; width: 74px; height: 40px; border-radius: 999px;
+  border: 3px solid var(--ink); background: #adb5bd; transition: background 0.2s; flex: none; }
+#ride-toggle .knob { position: absolute; top: 3px; left: 3px; width: 28px; height: 28px;
+  border-radius: 50%; background: #fff; border: 3px solid var(--ink);
+  transition: left 0.2s cubic-bezier(0.3, 1.6, 0.6, 1); }
+#ride-toggle .label { display: flex; flex-direction: column; line-height: 1.2; }
+#ride-toggle .label b { font-size: 18px; letter-spacing: 0.5px; }
+#ride-toggle .label small { font-size: 12px; color: var(--muted); font-weight: 600; }
+#ride-toggle.on .track { background: #1c7ed6; }
+#ride-toggle.on .knob { left: 37px; }
+#ride-toggle.on .label b { color: #1c7ed6; }
+#ride-toggle.off-req .track { background: var(--danger); }
+#ride-toggle.off-req .knob { left: 3px; }
+#ride-toggle.off-req .label b { color: var(--danger); }
+#ride-toggle.locked { cursor: not-allowed; opacity: 0.85; }
+
+body.in-menu #hud, body.in-menu #help, body.in-menu #topbar, body.in-menu #minimap,
+body.in-menu #ride-toggle, body.in-menu #ping-arrow, body.in-menu #feed,
+body.in-menu #follow { display: none !important; }
+
+/* --- main menu ---------------------------------------------------------------------- */
+#menu { position: absolute; inset: 0; z-index: 3000; display: grid; place-items: center;
+  background: rgba(251, 241, 214, 0.55); backdrop-filter: blur(2px); }
+#menu[hidden] { display: none; }
+.menu-card { max-width: min(520px, calc(100vw - 32px)); }
+.menu-logo { font-size: 64px; font-weight: 700; line-height: 1; color: var(--ink);
+  text-shadow: 4px 4px 0 var(--sun); }
+.menu-sub { margin: 6px 0 16px; color: var(--muted); font-weight: 600; letter-spacing: 0.5px; }
+.menu-buttons { display: flex; flex-direction: column; gap: 10px; }
+.menu-buttons button { width: 100%; margin: 0; }
+.menu-buttons button.hunter { background: var(--hunter); }
+.card button.secondary { background: var(--paper); color: var(--ink); }
+.how { margin-top: 14px; text-align: left; }
+.how summary { cursor: pointer; font-weight: 700; }
+.how ul { margin: 8px 0 0; padding-left: 20px; font-size: 14px; }
+.how li { margin-bottom: 6px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::after { animation: none !important; transition: none !important; }
 }
@@ -184,5 +271,7 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
   #help { display: none; }
   #hud { width: auto; right: 12px; }
   #feed { top: auto; bottom: 12px; }
+  #minimap { width: 140px; height: 140px; top: auto; bottom: 96px; }
+  #ride-toggle { min-width: 0; bottom: 12px; }
   #burst-text { font-size: 32px; padding: 50px 56px; }
 }
