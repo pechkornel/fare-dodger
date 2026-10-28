@@ -5,7 +5,7 @@ BKK network. Phase 1 covers the rules engine, transit routing, bots and simulati
 UI yet. This file holds the approved plan and the current status. Decisions with lasting
 consequences are recorded in [`decisions/`](decisions/).
 
-*Last updated: 2026-10-28.*
+*Last updated: 2026-10-28 (simulation runs stopped part-way; see "Remaining steps")*.
 
 ## Status at a glance
 
@@ -16,9 +16,9 @@ consequences are recorded in [`decisions/`](decisions/).
 | 2 | Playable network (merging, transfers, patterns, cache), ADR 0001 | #2 `feat/network` | ✅ merged |
 | 3 | RAPTOR + journeys + `reach`/`bench`, ADR 0002 | #3 `feat/raptor` | ✅ merged |
 | 4 | Rules engine, ADR 0003 | #4 `feat/game-engine` | ✅ merged |
-| 5 | Bots (random, greedy, belief) | #5 `feat/bots` | 🟡 PR open, waiting for CI |
-| 6 | Simulation runner + reports, bot tuning, ADR 0004 | `feat/sim` | 🔵 in progress |
-| 7 | README polish, CHANGELOG 0.1.0, tag `v0.1.0` | `docs/release-0.1.0` | ⚪ next |
+| 5 | Bots (random, greedy, belief) | #5 `feat/bots` | ✅ merged |
+| 6 | Simulation runner + reports, bot tuning, ADR 0004 | `feat/sim` (pushed, no PR yet) | 🔵 committed; rule-variant runs incomplete |
+| 7 | `docs/results.md`, CHANGELOG 0.1.0, tag `v0.1.0` | `docs/release-0.1.0` | ⚪ next |
 
 ## Approved plan
 
@@ -108,31 +108,111 @@ Deviations from the original sketch, none of which change the design:
 - 80+ offline tests on a hand-made GTFS fixture. CI is green on ubuntu and windows for
   every merged PR.
 
-### In progress (`feat/sim`)
-- Simulation runner, JSON/CSV/Markdown reports with Wilson 95% intervals, and `fare-dodger
-  sim --matrix --rule key=value`.
-- First baseline (100 games per matchup, default rules, seeds 42–141):
+- Simulation runner (`feat/sim`, committed and pushed). It covers:
+  - JSON/CSV/Markdown reports with Wilson 95% intervals, byte-identical on rerun;
+  - `fare-dodger sim --matrix --rule key=value`;
+  - a coverage placement strategy for BeliefInspectors (`belief`, the default) next to
+    `belief-kmeans`, documented in ADR 0004.
 
-  | Dodger | Inspectors | Dodger wins | Mean rounds survived | Catches (stop / vehicle) |
-  |---|---|---:|---:|---:|
-  | random | random | 89% | 11.50 | 9 / 2 |
-  | random | belief | 71% | 10.40 | 18 / 11 |
-  | greedy | random | 100% | 12.00 | 0 / 0 |
-  | greedy | belief | 77% | 10.85 | 5 / 18 |
+  105 offline tests pass.
 
-  Reading: the Dodger is strongly favoured. Belief tracking clearly helps the Inspectors
-  (89% → 71% against a random Dodger). Against the greedy Dodger most catches happen on a
-  shared vehicle, because greedy flight routes are predictable.
+### Results so far
+Default-rules matrix (200 games per matchup, seeds 42–241):
 
-### Next steps
-1. Finish `feat/sim`: tests for the runner, reports and byte-identical reruns. Then merge
-   #5 and open the sim PR.
-2. Tune BeliefInspectors with data, e.g. choose targets by next-round coverage instead of
-   the cluster centre, and exploit the vehicle rule. Write ADR 0004 (belief-state bots).
-3. Run larger matrices (≥ 500 games) and rule variants: mode reveals, reveal every 2
-   rounds, 4 Inspectors, shorter rounds, a smaller area. Derive rule-change suggestions.
-4. Release 0.1.0: polish the README (usage, architecture, benchmark, results), add the
-   CHANGELOG entry and tag `v0.1.0`.
+| Dodger | random Inspectors | belief (coverage) | belief-kmeans |
+|---|---:|---:|---:|
+| random | 90.5% Dodger wins | **50.5%** | 64.0% |
+| greedy | 99.0% | 87.0% | **76.5%** |
+
+The Dodger is strongly favoured under the v0 rules. Neither Inspector strategy dominates
+(ADR 0004).
+
+Rule variants against the greedy Dodger (200 games each). **The run was stopped
+part-way:** only `baseline` and `modes` finished, and `reveal2` was interrupted.
+
+| Variant | vs belief | vs belief-kmeans |
+|---|---:|---:|
+| baseline (default rules) | 87.0% [82–91%] | 76.5% [70–82%] |
+| `reveal_modes=true` | 55.0% [48–62%] | 57.0% [50–64%] |
+| `reveal_every=2` | not run | not run |
+| `n_inspectors=4` | not run | not run |
+| `reveal_modes=true` + `reveal_every=2` | not run | not run |
+| `n_inspectors=4` + `reveal_modes=true` | not run | not run |
+
+First signal: revealing the Dodger's modes each round is the strongest single lever found so
+far. It takes the greedy Dodger from 77–87% down to 55–57%.
+
+### Rerunning the rule-variant simulations
+Run these from the repository root. They need the downloaded feed (`uv run fare-dodger
+download`). Each run is 200 games with 4 workers and the default base seed 42, and takes
+about 1–2 minutes, so all 12 take about 15–25 minutes. Output goes to
+`results/rules/<variant>-<inspectors>/` (gitignored), and the same command gives
+byte-identical results.
+
+bash / zsh (macOS, Git Bash):
+
+```sh
+for v in "baseline|" \
+         "modes|--rule reveal_modes=true" \
+         "reveal2|--rule reveal_every=2" \
+         "four|--rule n_inspectors=4" \
+         "modes_reveal2|--rule reveal_modes=true --rule reveal_every=2" \
+         "four_modes|--rule n_inspectors=4 --rule reveal_modes=true"; do
+  name="${v%%|*}"; args="${v#*|}"
+  for insp in belief belief-kmeans; do
+    echo "== $name greedy vs $insp"
+    uv run fare-dodger sim --dodger greedy --inspectors "$insp" --games 200 --workers 4 \
+      $args --out "results/rules/$name-$insp" -c configs/default.toml
+  done
+done
+```
+
+PowerShell (Windows):
+
+```powershell
+$variants = [ordered]@{
+  baseline      = @()
+  modes         = @('--rule', 'reveal_modes=true')
+  reveal2       = @('--rule', 'reveal_every=2')
+  four          = @('--rule', 'n_inspectors=4')
+  modes_reveal2 = @('--rule', 'reveal_modes=true', '--rule', 'reveal_every=2')
+  four_modes    = @('--rule', 'n_inspectors=4', '--rule', 'reveal_modes=true')
+}
+foreach ($name in $variants.Keys) {
+  foreach ($insp in 'belief', 'belief-kmeans') {
+    "== $name greedy vs $insp"
+    uv run fare-dodger sim --dodger greedy --inspectors $insp --games 200 --workers 4 `
+      $variants[$name] --out "results/rules/$name-$insp" -c configs/default.toml
+  }
+}
+```
+
+The default-rules matrix (all 6 matchups) can be reproduced with:
+
+```sh
+uv run fare-dodger sim --matrix --games 200 --workers 4 --out results/m200 -c configs/default.toml
+```
+
+### Remaining steps
+1. **Open the `feat/sim` PR** against `main`, wait for CI on ubuntu + windows, then merge.
+2. **Finish the rule-variant runs** with the commands above. Only the four missing variants
+   (`reveal2`, `four`, `modes_reveal2`, `four_modes`) need running; `baseline` and `modes`
+   are already done.
+3. **Write `docs/results.md`** on a `docs/release-0.1.0` branch, covering:
+   - the default-rules matrix and the full rule-variant table, with 95% intervals;
+   - catch-type split (stop vs. vehicle), catches by round and the most common catch
+     locations;
+   - rule-change suggestions derived from the numbers, e.g. turning on mode reveals and
+     whichever reveal frequency / Inspector count brings the greedy Dodger towards the
+     balance target in open decision 1.
+
+   Restore the README link to `docs/results.md` once the file exists.
+4. **Release 0.1.0**, on the same `docs/release-0.1.0` branch:
+   - Move the CHANGELOG's `[Unreleased]` entries under `## [0.1.0] - <date>` and update
+     this plan's status table.
+   - Open the PR, wait for CI to pass, then merge.
+   - Tag the merge commit `v0.1.0` and push the tag (`git tag -a v0.1.0 -m "v0.1.0"`,
+     then `git push origin v0.1.0`).
 
 ## Open decisions (need input)
 1. **Balance target.** What win rate should the Dodger have against good Inspectors? 40–50%

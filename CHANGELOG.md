@@ -7,6 +7,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Simulation runner (`fare-dodger sim`): seeded matchups or `--matrix`, multiprocessing with
+  results independent of worker count, `--rule key=value` overrides, results.json / games.csv /
+  summary.md with Wilson 95% intervals.
+- BeliefInspectors coverage placement (default) and `belief-kmeans` for comparison; ADR 0004.
 - Bots: RandomDodger, RandomInspectors, GreedyDodger (max-min Inspector travel time),
   BeliefInspectors (sound belief set via multi-source RAPTOR, k-means coverage).
 - Rules engine (ADR 0003): simultaneous 10-minute rounds, journey validation, same-stop and
