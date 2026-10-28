@@ -7,12 +7,16 @@ far from the surface stops of the same name (and BKK rarely sets ``parent_statio
 either platform is a rail platform (metro or suburban rail) or belongs to a parent station, the
 wider ``station_radius_m`` applies. Names alone are not enough:
 Budapest has many unrelated stops called e.g. "Ady Endre utca" kilometres apart.
+
+A few junctions spread their same-name stops further apart than either radius. They are
+listed by name in a manual override (``name_radius_m``) with a radius of their own.
 """
 
 from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from fare_dodger.geo import distance_m
@@ -69,9 +73,17 @@ class UnionFind:
 
 
 def merge_platforms(
-    platforms: list[Platform], radius_m: float, station_radius_m: float | None = None
+    platforms: list[Platform],
+    radius_m: float,
+    station_radius_m: float | None = None,
+    name_radius_m: Mapping[str, float] | None = None,
 ) -> list[Cluster]:
-    """Group platforms into clusters, returned sorted by (name, first platform ID)."""
+    """Group platforms into clusters, returned sorted by (name, first platform ID).
+
+    ``name_radius_m`` maps a :func:`station_key` to a radius that replaces the usual one for
+    platforms of that name when it is larger.
+    """
+    overrides = name_radius_m or {}
     uf = UnionFind([p.stop_id for p in platforms])
     wide = max(radius_m, station_radius_m or 0.0)
 
@@ -85,11 +97,11 @@ def merge_platforms(
     for siblings in by_parent.values():
         for other in siblings[1:]:
             uf.union(siblings[0], other)
-    for group in by_name.values():
+    for key, group in by_name.items():
         for i, a in enumerate(group):
             for b in group[i + 1 :]:
                 station = a.parent_station or b.parent_station or a.is_rail or b.is_rail
-                limit = wide if station else radius_m
+                limit = max(wide if station else radius_m, overrides.get(key, 0.0))
                 if distance_m(a.lat, a.lon, b.lat, b.lon) <= limit:
                     uf.union(a.stop_id, b.stop_id)
 

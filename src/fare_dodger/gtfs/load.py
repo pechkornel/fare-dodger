@@ -95,7 +95,10 @@ def pick_service_date(feed_dir: Path, preference: date | Literal["auto"] = "auto
     services = active_services_by_date(feed_dir)
     if preference != "auto":
         if preference not in services:
-            msg = f"no service on {preference.isoformat()} in this feed"
+            msg = (
+                f"no service on {preference.isoformat()} in this feed; set [network] "
+                'service_date to a date the feed covers, or to "auto"'
+            )
             raise ValueError(msg)
         return preference
     trips = read_table(feed_dir, "trips", ["trip_id", "service_id"])

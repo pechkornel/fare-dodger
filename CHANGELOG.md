@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Manual station merges: `station_merge_overrides` in `NetworkConfig`, loaded from the file
+  named by `[network] station_overrides` (`configs/station_overrides.toml` merges 12 split
+  interchanges; the default network has 421 stations instead of 434). ADR 0001 addendum.
 - Simulation runner (`fare-dodger sim`): seeded matchups or `--matrix`, multiprocessing with
   results independent of worker count, `--rule key=value` overrides, results.json / games.csv /
   summary.md with Wilson 95% intervals.
@@ -25,3 +28,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - GTFS loading for one service day and time window (polars), automatic midweek date selection.
 - Hand-designed mini GTFS fixture for offline tests.
 - Project scaffold: uv, src layout, ruff, mypy (strict), pytest, pre-commit, GitHub Actions CI.
+
+### Changed
+- `configs/default.toml` pins `service_date = "2026-11-17"` so simulations are reproducible;
+  a pinned date missing from the feed now gives an error saying how to fix it.

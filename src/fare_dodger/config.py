@@ -40,6 +40,16 @@ ModeSet = Annotated[frozenset[Mode], PlainSerializer(_sorted_list, return_type=l
 NameSet = Annotated[frozenset[str], PlainSerializer(_sorted_list, return_type=list[str])]
 
 
+def _sorted_dict(values: dict[str, float]) -> dict[str, float]:
+    return dict(sorted(values.items()))
+
+
+NameRadii = Annotated[
+    dict[str, Annotated[float, Field(gt=0)]],
+    PlainSerializer(_sorted_dict, return_type=dict[str, float]),
+]
+
+
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -98,6 +108,10 @@ class NetworkConfig(_Frozen):
     merge_radius_m: float = Field(default=150.0, ge=0)
     #: Same-name radius when one platform is a metro/suburban-rail platform or has a parent.
     station_merge_radius_m: float = Field(default=300.0, ge=0)
+    #: Manual fixes: station name (without rail suffix) -> merge radius in metres, for
+    #: junctions whose same-name stops lie further apart than the radii above. In TOML,
+    #: usually loaded from the file named by ``[network] station_overrides``.
+    station_merge_overrides: NameRadii = Field(default_factory=dict)
     walk_radius_m: float = Field(default=400.0, ge=0)
     walk_speed_kmh: float = Field(default=5.0, gt=0)
     #: Multiplier on straight-line distance to approximate street routes.

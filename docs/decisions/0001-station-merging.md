@@ -46,3 +46,13 @@ connect nodes that remain separate.
   long interchange walks inside a big station are approximated. `pathways.txt` is not used.
 - The rules and radii are configuration and the cache key covers them, so changing them simply
   rebuilds the network.
+
+## Addendum (2026-10-28): manual merge overrides
+Twelve of the 14 residual splits were one interchange in practice: opposite-direction stops
+or tram and bus at the same crossing, 150–290 m apart. A player would read them as one
+station, but the game treated them as two places to stand. Rather than raising
+`merge_radius_m` for the whole city (which would start merging unrelated same-name stops),
+`configs/station_overrides.toml` lists those names with a 300 m radius of their own
+(`station_merge_overrides` in `NetworkConfig`, part of the cache key). The default network
+drops from 434 to 421 nodes. "Bajza utca" (486 m, metro on Andrássy út vs. trolleybus on
+Városligeti fasor) and "Tímár utca" (323 m, stops on different streets) stay split on purpose.

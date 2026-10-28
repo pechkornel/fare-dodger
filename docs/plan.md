@@ -17,7 +17,8 @@ consequences are recorded in [`decisions/`](decisions/).
 | 3 | RAPTOR + journeys + `reach`/`bench`, ADR 0002 | #3 `feat/raptor` | ✅ merged |
 | 4 | Rules engine, ADR 0003 | #4 `feat/game-engine` | ✅ merged |
 | 5 | Bots (random, greedy, belief) | #5 `feat/bots` | ✅ merged |
-| 6 | Simulation runner + reports, bot tuning, ADR 0004 | `feat/sim` (pushed, no PR yet) | 🔵 committed; rule-variant runs incomplete |
+| 6 | Simulation runner + reports, bot tuning, ADR 0004 | #7 `feat/sim` | ✅ merged |
+| 6b | Pinned service date, station merge overrides, decisions recorded | `feat/network-pinning` | 🔵 in review |
 | 7 | `docs/results.md`, CHANGELOG 0.1.0, tag `v0.1.0` | `docs/release-0.1.0` | ⚪ next |
 
 ## Approved plan
@@ -100,8 +101,9 @@ Deviations from the original sketch, none of which change the design:
 ## Progress
 
 ### Done
-- Real network (feed 2821.20261028, auto service day Tue 2026-11-17): **434 stations, 205
-  patterns, 5,401 trips, 1,964 footpaths**. It builds in about 0.5 s from the extracted feed.
+- Real network (feed 2821.20261028, pinned service day Tue 2026-11-17, with station
+  overrides): **421 stations, 204 patterns, 5,401 trips, 1,886 footpaths** (434 / 205 / 1,964
+  before the overrides). It builds in about 0.5 s from the extracted feed.
 - RAPTOR on the real network: a 10-minute query takes **0.35 ms median and 0.84 ms p95**
   (target: < 200 ms). A 45-minute query covering the whole network takes about 3.6 ms.
   Results match the oracle on both the fixture and the real network.
@@ -214,19 +216,25 @@ uv run fare-dodger sim --matrix --games 200 --workers 4 --out results/m200 -c co
    - Tag the merge commit `v0.1.0` and push the tag (`git tag -a v0.1.0 -m "v0.1.0"`,
      then `git push origin v0.1.0`).
 
-## Open decisions (need input)
-1. **Balance target.** What win rate should the Dodger have against good Inspectors? 40–50%
-   is a common goal. Rule changes will be proposed from the simulations, but the target is
-   a design choice.
-2. **Inspector positions public.** "Last known positions" was taken to mean that Inspectors
-   are visible to the Dodger every round. This can be toggled with `inspectors_visible`.
-3. **Pass-through is safe.** Crossing an Inspector's station mid-round is not a catch; only
-   end positions and shared vehicles count (ADR 0003). Should passing *through* the same
-   station at the same minute count too?
-4. **Reproducibility across feed updates.** BKK replaces the feed regularly, so `auto` picks
-   a new service day each time. Should simulation configs pin `service_date` and keep the
-   feed zip used for published results?
-5. **Residual station splits.** 14 names still map to 2–3 nodes 150–490 m apart (separate
-   surface stops joined by walks). Is that acceptable, or should the radius be raised?
-6. **PR workflow.** PRs are merged by me (merge commits) once CI is green. Do you want to
-   review each PR before it is merged?
+## Decisions (resolved 2026-10-28)
+These were open questions; the owner chose the defaults below.
+
+1. **Balance target: the Dodger should win about 45%** of games against the best Inspector
+   strategy (the one with the lowest Dodger win rate for that rule set). Rule-change
+   suggestions in `docs/results.md` aim at this number.
+2. **Visibility: all Inspector positions are public.** Inspectors always see each other, and
+   the Dodger always sees the Inspectors (`inspectors_visible = true`, unchanged).
+3. **Pass-through is safe.** Passing through the Dodger's station mid-round is not a catch.
+   Only ending the round at the same station or sharing a vehicle trip over an overlapping
+   stretch counts (ADR 0003, unchanged).
+4. **Pinned service date.** `configs/default.toml` pins `service_date = "2026-11-17"` (a
+   Tuesday in feed 2821.20261028, the date `auto` picked), so published simulations are
+   reproducible. It stays configurable, and `"auto"` is still the code default. Once BKK
+   replaces the feed and drops that date, the build fails with a message saying to set a new
+   date. Published results name the feed version they used.
+5. **Station splits: obvious ones fixed by hand.** `configs/station_overrides.toml` merges 12
+   of the 14 residual splits (one interchange each, 150–290 m apart). "Bajza utca" (486 m)
+   and "Tímár utca" (323 m) stay split. The network drops from 434 to 421 nodes. See the ADR
+   0001 addendum.
+6. **PR workflow.** PRs are merged by Claude (merge commits) once CI is green on ubuntu and
+   windows, with a two-line summary of each PR given to the owner.

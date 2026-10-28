@@ -43,10 +43,20 @@ class Workspace:
 
 
 def network_config(path: Path | None) -> NetworkConfig:
-    """``[network]`` section of a TOML file, or the defaults."""
+    """``[network]`` section of a TOML file, or the defaults.
+
+    ``station_overrides = "<file>"`` (relative to the config file) loads the ``[merge]`` table
+    of that file into ``station_merge_overrides``, so the overrides are part of the cache key.
+    """
     if path is None:
         return NetworkConfig()
-    return NetworkConfig.model_validate(load_toml(path).get("network", {}))
+    section = dict(load_toml(path).get("network", {}))
+    overrides = section.pop("station_overrides", None)
+    if overrides is not None:
+        merges = load_toml(path.parent / overrides).get("merge", {})
+        inline = section.get("station_merge_overrides", {})
+        section["station_merge_overrides"] = {**merges, **inline}
+    return NetworkConfig.model_validate(section)
 
 
 def rules_config(path: Path | None) -> RulesConfig:

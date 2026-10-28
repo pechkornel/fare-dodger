@@ -1,0 +1,23 @@
+# Manual station merges, loaded by `station_overrides` in the [network] section.
+#
+# Each entry is a station name (without the " M" / " H" rail suffix) and a merge radius in
+# metres. Platforms with that name are merged within the radius, in addition to the
+# automatic rules (ADR 0001). List only junctions where the same-name stops clearly form one
+# interchange: opposite-direction stops or tram and bus at the same crossing.
+#
+# Left split on purpose: "Bajza utca" (486 m, metro on Andrássy út vs. trolleybus on
+# Városligeti fasor) and "Tímár utca" (323 m, stops on different streets).
+
+[merge]
+"Alagút utca" = 300
+"Császár-Komjádi uszoda" = 300
+"Döbrentei tér" = 300
+"Haller utca / Soroksári út" = 300
+"Hengermalom út" = 300
+"Margitsziget / Margit híd" = 300
+"Mikó utca" = 300
+"Nagyszombat utca" = 300
+"Petőfi híd, budai hídfő" = 300
+"Szent Imre Kórház" = 300
+"Szent János Kórház" = 300
+"Széchenyi István tér" = 300
