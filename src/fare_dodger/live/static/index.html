@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fare Dodger Live</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="hud" class="panel">
+    <div class="clock-row">
+      <span id="clock">--:--:--</span>
+      <span id="remaining" class="muted"></span>
+    </div>
+    <div class="ping-row">
+      <span class="muted">Next ping</span>
+      <div class="bar"><div id="ping-bar"></div></div>
+      <span id="ping-in" class="muted"></span>
+    </div>
+    <div id="nearest" class="muted"></div>
+    <div id="status" class="status"></div>
+    <div id="stop" class="stop"></div>
+  </div>
+
+  <div id="feed"></div>
+
+  <div id="help" class="panel">
+    <b>WASD</b>/arrows walk · <b>E</b> wait for next / get off · <b>1–6</b> wait for a departure ·
+    <b>F</b> follow · <b>R</b> new game
+  </div>
+
+  <button id="follow" class="panel" type="button" hidden>Follow me (F)</button>
+
+  <div id="overlay" hidden>
+    <div class="panel card">
+      <h1 id="result-title"></h1>
+      <p id="result-text"></p>
+      <p id="result-stats" class="muted"></p>
+      <button id="again" type="button">Play again (R)</button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>

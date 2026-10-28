@@ -208,6 +208,51 @@ class RulesConfig(_Frozen):
         return self.round_window(self.rounds - 1)[1]
 
 
+class LiveConfig(_Frozen):
+    """Real-time prototype: one human Dodger walking and riding against bot Inspectors."""
+
+    start_time: str = "08:00"
+    duration_minutes: int = Field(default=30, gt=0)
+    #: Timetable seconds that pass per real second.
+    time_scale: float = Field(default=10.0, gt=0)
+    #: The Inspectors learn the Dodger's position this often (timetable seconds).
+    ping_every_s: int = Field(default=180, gt=0)
+    n_inspectors: int = Field(default=3, ge=1)
+    walk_speed_kmh: float = Field(default=5.0, gt=0)
+    #: An Inspector on foot this close to an exposed Dodger catches them.
+    catch_radius_m: float = Field(default=25.0, gt=0)
+    #: An Inspector on foot spots a Dodger on foot within this distance and gives chase.
+    sight_radius_m: float = Field(default=100.0, ge=0)
+    #: How close to a stop the Dodger must stand to wait for and board a vehicle.
+    board_radius_m: float = Field(default=40.0, gt=0)
+    #: Minimum travel time (minutes) from every Inspector to the Dodger at the start.
+    min_start_distance_min: int = Field(default=8, ge=0)
+    #: Fixed seed for reproducible games; ``None`` picks a new one per game.
+    seed: int | None = None
+    tile_url: str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    tile_attribution: str = (
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    )
+
+    @field_validator("start_time")
+    @classmethod
+    def _valid_start(cls, value: str) -> str:
+        parse_hms(value)
+        return value
+
+    @property
+    def start_seconds(self) -> int:
+        return parse_hms(self.start_time)
+
+    @property
+    def end_seconds(self) -> int:
+        return self.start_seconds + self.duration_minutes * 60
+
+    @property
+    def walk_speed_mps(self) -> float:
+        return self.walk_speed_kmh / 3.6
+
+
 def data_dir() -> Path:
     """Directory for downloaded feeds and built networks (``./data`` by default)."""
     return Path(os.environ.get(DATA_DIR_ENV, "data")).resolve()

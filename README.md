@@ -38,6 +38,20 @@ uv run fare-dodger sim --matrix --games 200 --workers 4 --out results/matrix
 uv run fare-dodger sim --dodger greedy --inspectors belief --rule reveal_modes=true
 ```
 
+### Live prototype
+
+```sh
+uv run fare-dodger play --open         # http://127.0.0.1:8000/ (uses configs/live.toml)
+```
+
+A real-time version on an inner-Pest district (VII–VIII), drawn on OpenStreetMap tiles. You
+are the Dodger: walk with **WASD**, stand at a stop and press **E** (or **1–6** to pick a
+departure) to wait for a real tram, trolleybus, bus or metro, and press **E** again to get off
+at the next stop. Three bot Inspectors learn your position every 3 timetable minutes, chase
+you on sight, and catch you on foot, at a stop, or on the same vehicle. Survive 30 timetable
+minutes (3 real minutes at 10× speed) to win. See
+[ADR 0005](docs/decisions/0005-live-prototype.md).
+
 Every command takes `-c configs/default.toml`, which documents every network and rule
 setting. `--rule key=value` overrides a single rule for a simulation. The config pins the
 service date and applies the manual station merges in `configs/station_overrides.toml`, so

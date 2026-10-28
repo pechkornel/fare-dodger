@@ -6,6 +6,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Live prototype (`fare-dodger play`): a real-time, single-player browser game on an inner-Pest
+  district. Walk with WASD, wait for and ride real trips, and avoid bot Inspectors who are pinged
+  your position every 3 minutes. FastAPI WebSocket server, Leaflet client on OpenStreetMap tiles,
+  `configs/live.toml`; ADR 0005.
+
 ## [0.1.0] - 2026-10-28
 
 ### Added

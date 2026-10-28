@@ -1,0 +1,38 @@
+# Live (real-time) prototype: a small inner-Pest district on real timetables.
+# Run with `uv run fare-dodger play`. Network keys not listed here use the code defaults.
+
+[network]
+service_date = "2026-11-17"   # same pinned Tuesday as configs/default.toml
+window_start = "07:30"
+window_end = "09:30"
+station_overrides = "station_overrides.toml"
+
+[network.area]
+# Inner Pest (districts VII and VIII, edges of VI and IX): Deák Ferenc tér, Oktogon,
+# Keleti pályaudvar, Nagyvárad tér, Boráros tér, Fővám tér. Kept on the Pest side so
+# free walking never crosses the Danube.
+kind = "polygon"
+vertices = [
+  [47.4979, 19.0544],
+  [47.5054, 19.0630],
+  [47.5008, 19.0845],
+  [47.4788, 19.0912],
+  [47.4810, 19.0656],
+  [47.4866, 19.0585],
+]
+
+[live]
+start_time = "08:00"
+duration_minutes = 30
+time_scale = 10.0            # timetable seconds per real second (30 min = 3 real minutes)
+ping_every_s = 180           # the Inspectors learn the Dodger's position this often
+n_inspectors = 3
+walk_speed_kmh = 5.0
+catch_radius_m = 25.0        # Inspector on foot this close to an exposed Dodger
+sight_radius_m = 100.0       # Inspectors on foot chase a Dodger on foot within this
+board_radius_m = 40.0        # stand this close to a stop to wait for a vehicle
+min_start_distance_min = 8
+# OpenStreetMap's tile servers are fine for local play; use another tile provider for any
+# public deployment (https://operations.osmfoundation.org/policies/tiles/).
+tile_url = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+tile_attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

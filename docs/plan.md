@@ -182,7 +182,16 @@ The default-rules matrix (all 6 matchups) can be reproduced with:
 uv run fare-dodger sim --matrix --games 200 --workers 4 --out results/m200 -c configs/default.toml
 ```
 
-### Next (phase 2 candidates)
+### Phase 2: live game (started 2026-10-28)
+The owner chose a real-time direction: walk around a real map with WASD and ride real
+vehicles, single-player against bots first, team-vs-team multiplayer later. Street walking
+comes later; the first prototype uses one district on real map tiles. See ADR 0005.
+
+- ✅ Prototype: `fare-dodger play` on an inner-Pest district (`feat/live-prototype`).
+- Next: playtest and tune (time scale, ping interval, sight/catch radii, bot strength), GTFS
+  shapes for vehicle paths, street-network walking, then multiplayer teams.
+
+### Next (phase 1 follow-ups)
 1. Decide whether to adopt the suggested v1 rules (`reveal_modes = true`, `reveal_every = 2`)
    as the defaults.
 2. Make the greedy Dodger avoid dead-end stops at the edge of the area (the most common catch
