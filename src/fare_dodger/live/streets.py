@@ -160,7 +160,7 @@ class StreetGraph:
             for cx in range(self._cell(min(x0, x1)), self._cell(max(x0, x1)) + 1):
                 for cy in range(self._cell(min(y0, y1)), self._cell(max(y0, y1)) + 1):
                     self._cells[(cx, cy)].append(i)
-        self._path_cache: dict[tuple[int, int], list[Point]] = {}
+        self._path_cache: dict[tuple[Point, Point], list[Point]] = {}
 
     @classmethod
     def from_osm(
@@ -365,7 +365,7 @@ class StreetGraph:
         nodes.reverse()
         return [start, *(xy[n] for n in nodes), goal]
 
-    def station_path(self, a: Point, b: Point, key: tuple[int, int]) -> list[Point]:
+    def station_path(self, a: Point, b: Point, key: tuple[Point, Point]) -> list[Point]:
         """Cached walking path between two stations: ``a``, the street route, then ``b``."""
         path = self._path_cache.get(key)
         if path is None:

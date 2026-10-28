@@ -44,20 +44,45 @@ class AgentState:
     node: int | None
 
 
+def leg_ends(world: World, journey: Journey) -> list[tuple[Point, Point]]:
+    """Where each leg of ``journey`` starts and ends: rides at their vehicles' stop points,
+    walks between the neighbouring rides (or station centres)."""
+    legs = journey.legs
+    rides: list[tuple[Point, Point] | None] = [
+        (
+            world.stop_point(leg.pattern, leg.board_pos),
+            world.stop_point(leg.pattern, leg.alight_pos),
+        )
+        if isinstance(leg, RideLeg)
+        else None
+        for leg in legs
+    ]
+    ends: list[tuple[Point, Point]] = []
+    for k, leg in enumerate(legs):
+        ride = rides[k]
+        if ride is not None:
+            ends.append(ride)
+            continue
+        start = ends[-1][1] if ends else world.node_xy[leg.from_node]
+        after = rides[k + 1] if k + 1 < len(legs) else None
+        ends.append((start, after[0] if after is not None else world.node_xy[leg.to_node]))
+    return ends
+
+
 def journey_state(world: World, journey: Journey, t: float) -> AgentState:
     """Where someone following ``journey`` is at time ``t``."""
-    for leg in journey.legs:
+    ends = leg_ends(world, journey)
+    for leg, (start, end) in zip(journey.legs, ends, strict=True):
         if t < leg.dep:
-            return AgentState(world.node_xy[leg.from_node], None, leg.from_node)
+            return AgentState(start, None, leg.from_node)
         if t <= leg.arr:
             if isinstance(leg, RideLeg):
                 state = world.trip_state(leg.trip, t)
-                pos = state.pos if state else world.node_xy[leg.to_node]
-                return AgentState(pos, leg.trip, None)
+                return AgentState(state.pos if state else end, leg.trip, None)
             f = (t - leg.dep) / (leg.arr - leg.dep) if leg.arr > leg.dep else 1.0
-            return AgentState(world.walk_point(leg.from_node, leg.to_node, f), None, None)
+            return AgentState(world.walk_point(start, end, f), None, None)
     dest = journey.destination
-    return AgentState(world.node_xy[dest], None, dest)
+    return AgentState(ends[-1][1] if ends else world.node_xy[dest], None, dest)
 
 
 @dataclass

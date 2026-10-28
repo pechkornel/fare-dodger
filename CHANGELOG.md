@@ -24,6 +24,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   skip), for you and the bots. Time runs at 6× instead of 10× (rounds are about 4 minutes),
   and characters jog at 10 km/h. Bounty Hunters now catch you only on the same vehicle or when
   you are both on foot. ADR 0007.
+- Live game: smooth route lines. Vehicles stop at their platforms on the route shape instead
+  of spiking into the station centre, and shapes are cleaned of spikes and jitter.
 
 ## [0.1.0] - 2026-10-28
 

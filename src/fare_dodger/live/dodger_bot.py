@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fare_dodger.config import LiveConfig
+from fare_dodger.live.bots import leg_ends
 from fare_dodger.live.world import Departure, Point, World, distance
 from fare_dodger.routing.journey import Journey, RideLeg
 from fare_dodger.routing.raptor import raptor, reachable
@@ -138,7 +139,7 @@ class BotDodger:
             self.next_plan = t
             d.waiting_for = None
             return None
-        stop = world.node_xy[leg.from_node]
+        stop = world.stop_point(leg.pattern, leg.board_pos)
         if distance(d.pos, stop) > 0.5:
             return stop
         if d.waiting_for is None:
@@ -228,9 +229,9 @@ class BotDodger:
                 break
         if best is None:
             return
-        self.steps = [Step(xy[origin])] + [
-            Step(xy[leg.to_node], leg) if isinstance(leg, RideLeg) else Step(xy[leg.to_node])
-            for leg in best.legs
+        self.steps = [
+            Step(end, leg) if isinstance(leg, RideLeg) else Step(end)
+            for leg, (_, end) in zip(best.legs, leg_ends(world, best), strict=True)
         ]
         self.steps.append(Step(self._hiding_spot(xy[best.destination])))
 
