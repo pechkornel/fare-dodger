@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+import statistics
 import sys
 import time
 from collections import Counter
@@ -16,6 +18,8 @@ from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
 from fare_dodger.modes import VEHICLE_MODES
 from fare_dodger.network.timetable import Timetable
+from fare_dodger.routing.raptor import reachable
+from fare_dodger.timeutil import format_hm, parse_hms
 from fare_dodger.workspace import Workspace, network_config
 
 app = typer.Typer(
@@ -125,3 +129,75 @@ def info(
             if a < b
         )
         typer.echo(f"  {name:<40}{len(idx):>3} nodes, closest pair {gap:.0f} m apart")
+
+
+def _resolve_node(tt: Timetable, query: str) -> int:
+    if query.isdigit() and int(query) < tt.n_nodes:
+        return int(query)
+    matches = tt.find_nodes(query)
+    if not matches:
+        raise typer.BadParameter(f"no station matches {query!r}")
+    if len(matches) > 1:
+        names = ", ".join(f"{tt.node_name[m]} (#{m})" for m in matches[:8])
+        raise typer.BadParameter(f"{query!r} is ambiguous: {names}; use the #number")
+    return matches[0]
+
+
+@app.command()
+def reach(
+    station: Annotated[str, typer.Argument(help="Station name (or node number)")],
+    at: Annotated[str, typer.Option(help="Departure time HH:MM")] = "08:00",
+    minutes: Annotated[int, typer.Option(help="Time budget in minutes")] = 10,
+    journeys: Annotated[bool, typer.Option(help="Print the journey to each station")] = False,
+    config: ConfigOpt = None,
+    data: DataDirOpt = None,
+) -> None:
+    """List every station reachable from STATION within the time budget."""
+    tt = _open_network(config, data)
+    origin = _resolve_node(tt, station)
+    t_dep = parse_hms(at)
+    started = time.perf_counter()
+    result = reachable(tt, [origin], t_dep, minutes * 60)
+    elapsed = (time.perf_counter() - started) * 1000
+    reached = result.reached()
+    typer.echo(
+        f"{len(reached)} stations reachable from {tt.node_name[origin]} "
+        f"leaving {format_hm(t_dep)} within {minutes} min ({elapsed:.1f} ms)"
+    )
+    for node in reached:
+        arrival = result.arrival(node)
+        assert arrival is not None
+        line = f"  {format_hm(arrival)}  {tt.node_name[node]}"
+        if journeys:
+            line += f"    [{result.journey(node).describe(tt.node_name)}]"
+        typer.echo(line)
+
+
+@app.command()
+def bench(
+    queries: Annotated[int, typer.Option(help="Number of random origins")] = 500,
+    at: Annotated[str, typer.Option(help="Departure time HH:MM")] = "08:00",
+    minutes: Annotated[int, typer.Option(help="Time budget in minutes")] = 10,
+    seed: int = 0,
+    config: ConfigOpt = None,
+    data: DataDirOpt = None,
+) -> None:
+    """Time single-origin reachability queries (RAPTOR) on random stations."""
+    tt = _open_network(config, data)
+    rng = random.Random(seed)
+    t_dep = parse_hms(at)
+    timings: list[float] = []
+    sizes: list[int] = []
+    for _ in range(queries):
+        origin = rng.randrange(tt.n_nodes)
+        started = time.perf_counter()
+        result = reachable(tt, [origin], t_dep, minutes * 60)
+        timings.append((time.perf_counter() - started) * 1000)
+        sizes.append(len(result.reached()))
+    timings.sort()
+    p95 = timings[int(0.95 * (len(timings) - 1))]
+    typer.echo(
+        f"{queries} queries, {minutes} min from {at}: median {statistics.median(timings):.2f} ms, "
+        f"p95 {p95:.2f} ms, max {timings[-1]:.2f} ms; "
+        f"median {statistics.median(sizes):.0f} stations reached"
+    )

@@ -21,6 +21,8 @@ def test_station_key_strips_rail_suffixes() -> None:
     assert station_key("Deák Ferenc tér M") == "Deák Ferenc tér"
     assert station_key("Örs vezér tere M+H") == "Örs vezér tere"
     assert station_key("Batthyány tér H") == "Batthyány tér"
+    assert station_key("Astoria M (Dohány utca)") == "Astoria"
+    assert station_key("Hild tér (Deák Ferenc tér M)") == "Hild tér (Deák Ferenc tér M)"
     assert station_key("Mexikói út") == "Mexikói út"
     assert station_key("Hamzsabégi út") == "Hamzsabégi út"
 

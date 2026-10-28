@@ -18,8 +18,9 @@ from dataclasses import dataclass
 from fare_dodger.geo import distance_m
 
 #: BKK suffixes surface stops with " M" (metro), " H" (HÉV) or " M+H" when a rail station is
-#: there, while the rail platforms themselves carry the bare name.
-_RAIL_SUFFIX = re.compile(r"\s+(?:M\+H|M|H)$")
+#: there, optionally followed by the street, e.g. "Astoria M (Dohány utca)". The rail
+#: platforms themselves carry the bare name.
+_RAIL_SUFFIX = re.compile(r"\s+(?:M\+H|M|H)(?:\s+\([^)]*\))?$")
 
 
 def station_key(name: str) -> str:
