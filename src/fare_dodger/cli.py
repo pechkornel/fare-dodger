@@ -9,6 +9,7 @@ import time
 import tomllib
 import webbrowser
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -23,6 +24,7 @@ from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
 from fare_dodger.live.cafes import download_cafes, pick_cafes, read_cafes
 from fare_dodger.live.match import District
+from fare_dodger.live.parks import Parks, download_parks, read_parks
 from fare_dodger.live.server import create_app
 from fare_dodger.live.streets import (
     BBox,
@@ -297,18 +299,24 @@ def sim(
 LIVE_CONFIG = Path("configs/live.toml")
 
 
-def _load_cafes(workspace: Workspace, bbox: BBox) -> list[tuple[str, float, float]]:
-    """Cafés from OpenStreetMap, downloaded once; none (with a warning) if that fails."""
-    cafes = read_cafes(workspace.cafes_file, bbox)
-    if cafes is None:
-        typer.echo("downloading cafés from OpenStreetMap (Overpass)...", err=True)
+def _load_osm_extra[T](
+    what: str,
+    path: Path,
+    bbox: BBox,
+    read: Callable[[Path, BBox], list[T] | None],
+    download: Callable[[Path, BBox], Path],
+) -> list[T]:
+    """An optional OpenStreetMap layer, downloaded once; empty (with a warning) if that fails."""
+    found = read(path, bbox)
+    if found is None:
+        typer.echo(f"downloading {what} from OpenStreetMap (Overpass)...", err=True)
         try:
-            download_cafes(workspace.cafes_file, bbox)
+            download(path, bbox)
         except httpx.HTTPError as exc:
-            typer.echo(f"  no cafés this time ({exc}); playing without coffee", err=True)
+            typer.echo(f"  no {what} this time ({exc}); playing without them", err=True)
             return []
-        cafes = read_cafes(workspace.cafes_file, bbox) or []
-    return cafes
+        found = read(path, bbox) or []
+    return found
 
 
 @app.command()
@@ -347,7 +355,13 @@ def play(
             typer.echo("downloading streets from OpenStreetMap (Overpass, ~1 min)...", err=True)
             download_streets(workspace.streets_file, bbox)
             osm = read_streets(workspace.streets_file, bbox)
-    cafes = _load_cafes(workspace, covering_bbox([area_bbox(net.area) for _, net in nets]))
+    everywhere = covering_bbox([area_bbox(net.area) for _, net in nets])
+    cafes = _load_osm_extra("cafés", workspace.cafes_file, everywhere, read_cafes, download_cafes)
+    parks = (
+        _load_osm_extra("parks", workspace.parks_file, everywhere, read_parks, download_parks)
+        if streets
+        else []
+    )
     districts = []
     for name, net in nets:
         started = time.perf_counter()
@@ -356,9 +370,13 @@ def play(
         if osm is not None:
             world.set_streets(StreetGraph.from_osm(*osm, world.proj.to_xy, net.area.contains))
         world.cafes = pick_cafes(cafes, world, cfg.cafes_per_district)
+        if parks:
+            world.parks = Parks.from_latlon(parks, world.proj.to_xy, net.area.contains)
         districts.append(District(name, world))
         street_info = f", {len(world.streets)} street nodes" if world.streets else ""
         street_info += f", {len(world.cafes)} cafés"
+        if world.parks is not None:
+            street_info += f", {len(world.parks)} parks and squares"
         typer.echo(
             f"  {name}: {tt.n_nodes} stations, {tt.n_patterns} patterns{street_info} "
             f"({time.perf_counter() - started:.1f}s)",

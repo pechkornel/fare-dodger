@@ -27,6 +27,7 @@ from fare_dodger.network.timetable import Timetable
 
 if TYPE_CHECKING:
     from fare_dodger.live.cafes import Cafe
+    from fare_dodger.live.parks import Parks
 
 Point = tuple[float, float]
 
@@ -67,6 +68,8 @@ class TripState:
     stop: int
     #: Standing at a stop (or within a few seconds of one), so doors are open.
     at_stop: bool
+    #: Direction of travel (radians, counter-clockwise from east).
+    heading: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +101,8 @@ class World:
         self.stop_xy = list(self.node_xy)
         #: Coffee shops (see :mod:`fare_dodger.live.cafes`).
         self.cafes: list[Cafe] = []
+        #: Open ground walkable in any direction (see :mod:`fare_dodger.live.parks`).
+        self.parks: Parks | None = None
         self.trip_pattern = [0] * tt.n_trips
         for p in range(tt.n_patterns):
             for trip in range(tt.pat_trip_ptr[p], tt.pat_trip_ptr[p + 1]):
@@ -212,6 +217,16 @@ class World:
         span = cum[j + 1] - cum[j]
         return lerp(path[j], path[j + 1], (target - cum[j]) / span if span > 0 else 0.0)
 
+    def hop_heading(self, pattern: int, hop: int, f: float) -> float:
+        """Direction of travel a fraction ``f`` of the way along ``hop`` of ``pattern``."""
+        path, cum = self._paths[pattern][hop]
+        target = f * cum[-1]
+        j = min(max(bisect_right(cum, target) - 1, 0), len(path) - 2)
+        while j < len(path) - 2 and cum[j + 1] - cum[j] < 1e-6:
+            j += 1
+        (x0, y0), (x1, y1) = path[j], path[j + 1]
+        return math.atan2(y1 - y0, x1 - x0)
+
     def pattern_path(self, pattern: int) -> list[Point]:
         """The whole path of ``pattern``, stop to stop."""
         hops = self._paths[pattern]
@@ -248,13 +263,19 @@ class World:
         if t < arr[0] or t > arr[-1]:
             return None
         i = bisect_right(arr, t) - 1
+        pattern = self.trip_pattern[trip]
         if t <= dep[i] or i == len(arr) - 1:
-            return TripState(trip, self._stop_points[self.trip_pattern[trip]][i], i, True)
+            # Standing: facing the way it will leave (or the way it came, at the last stop).
+            last = i == len(arr) - 1
+            heading = (
+                self.hop_heading(pattern, i - 1, 1.0) if last else self.hop_heading(pattern, i, 0.0)
+            )
+            return TripState(trip, self._stop_points[pattern][i], i, True, heading)
         f = (t - dep[i]) / (arr[i + 1] - dep[i])
-        pos = self.hop_point(self.trip_pattern[trip], i, f)
+        pos = self.hop_point(pattern, i, f)
         grace = self.AT_STOP_GRACE_S
         at_stop = t - dep[i] <= grace or arr[i + 1] - t <= grace
-        return TripState(trip, pos, i, at_stop)
+        return TripState(trip, pos, i, at_stop, self.hop_heading(pattern, i, f))
 
     def active_trips(self, t: float) -> list[TripState]:
         states = []

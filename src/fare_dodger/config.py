@@ -217,7 +217,10 @@ class LiveConfig(_Frozen):
     time_scale: float = Field(default=6.0, gt=0)
     #: The Bounty Hunters learn the Dodger's position this often (timetable seconds).
     ping_every_s: int = Field(default=180, gt=0)
-    n_hunters: int = Field(default=3, ge=1)
+    #: The Bounty Hunters always outnumber the Dodgers by this many (bots fill the places).
+    hunter_extra: int = Field(default=2, ge=0)
+    #: Real seconds of countdown before each round, while nobody can move.
+    freeze_s: float = Field(default=3.0, ge=0)
     #: A brisk jog: faster than real walking so rounds stay short, still well below the
     #: vehicles (and street routes are longer than the straight line).
     walk_speed_kmh: float = Field(default=10.0, gt=0)
@@ -281,6 +284,11 @@ class LiveConfig(_Frozen):
     @property
     def walk_speed_mps(self) -> float:
         return self.walk_speed_kmh / 3.6
+
+    @property
+    def n_hunters(self) -> int:
+        """Bounty Hunters per round: one Dodger (for now) plus ``hunter_extra``."""
+        return 1 + self.hunter_extra
 
     @property
     def coffee_speed_mps(self) -> float:

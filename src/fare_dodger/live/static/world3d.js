@@ -724,6 +724,14 @@ function pointAlong(rec, u, k) {
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
+// Ease-out with a little overshoot, 0 -> 1 over x in [0, 1].
+function popIn(x) {
+  if (x >= 1) return 1;
+  const c = 1.7;
+  const u = Math.max(0, x) - 1;
+  return Math.max(0.001, 1 + (c + 1) * u * u * u + c * u * u);
+}
+
 // Bend the sections along the driven path (articulated buses and trams fold at their bellows,
 // metro cars at their couplers), and give each section a little suspension: it leans out of
 // curves, dips when braking, squats when pulling away and jiggles while moving.
@@ -1051,15 +1059,19 @@ export class ToyTown {
     if (!this.origin) return;
     this.focus = this.local(s.player.pos[0], s.player.pos[1]);
     const seen = new Set();
-    for (const [trip, lat, lon, mode] of s.vehicles) {
+    for (const [trip, lat, lon, mode, , heading] of s.vehicles) {
       seen.add(trip);
       let rec = this.vehicles.get(trip);
       if (!rec) {
-        rec = { ...makeVehicle(mode), heading: null, angle: 0, trail: [] };
+        // Born facing the way it drives and lying straight along its track (no trail yet),
+        // then popping in, instead of appearing sideways and swinging round.
+        rec = { ...makeVehicle(mode), heading, angle: heading, trail: [], age: 0 };
+        rec.root.scale.setScalar(0.001);
         this.vehicles.set(trip, rec);
         this.actors.add(rec.root);
       }
       this.retarget(rec, this.local(lat, lon));
+      rec.heading = heading;   // the timetable knows which way it is going
       rec.mine = s.ride && s.ride.trip === trip;
     }
     for (const [trip, rec] of this.vehicles) {
@@ -1141,7 +1153,8 @@ export class ToyTown {
 
     for (const rec of this.vehicles.values()) {
       step(rec);
-      rec.root.scale.setScalar(vehicleK);
+      rec.age += dt;
+      rec.root.scale.setScalar(vehicleK * popIn(rec.age / 0.35));
       rec.body.position.z = rec.mine ? Math.abs(Math.sin(t * 6)) * 0.25 : 0;
       articulate(rec, vehicleK, dt, t);
     }

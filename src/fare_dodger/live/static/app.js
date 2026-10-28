@@ -43,9 +43,39 @@ const cam = { zoom: START_ZOOM, target: null };
 
 const markers = { vehicles: new Map(), hunters: [], player: null, dodger: null };
 
+// The main menu shows over the first district's map; a match starts from there.
+let leaving = false;     // closing the connection on purpose (back to the menu)
+let pending = null;      // newest snapshot not drawn yet
+let pendingEvents = [];  // messages from every snapshot since the last frame
+
 function init() {
-  connect();
+  setupMinimap();
+  showMenu();
+  loadDistrict(0);
   requestAnimationFrame(frame);
+}
+
+function showMenu() {
+  document.body.classList.add("in-menu");
+  $("menu").hidden = false;
+  $("overlay").hidden = true;
+  $("countdown").hidden = true;
+}
+
+function startMatch(role) {
+  document.body.classList.remove("in-menu");
+  $("menu").hidden = true;
+  shownRound = null;
+  match = null;
+  connect(role);
+}
+
+function quitToMenu() {
+  if (ws) { leaving = true; ws.close(); ws = null; }
+  for (const k of Object.keys(keys)) keys[k] = false;
+  showMenu();
+  district = -1;
+  loadDistrict(0);
 }
 
 function createMap(w) {
@@ -80,6 +110,12 @@ function zoomBy(delta) {
 
 function frame() {
   requestAnimationFrame(frame);
+  if (pending) {
+    const snapshot = { ...pending, events: pendingEvents };
+    pending = null;
+    pendingEvents = [];
+    render(snapshot);
+  }
   if (!map || dragging) return;
   const z = map.getZoom();
   const now = performance.now();
@@ -218,11 +254,20 @@ function clearDynamic() {
   last.money = last.tickets = null;
 }
 
-function connect() {
+function connect(role) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onmessage = (ev) => render(JSON.parse(ev.data));
-  ws.onclose = () => toast("end", "Disconnected from the server. Reload to play again.");
+  leaving = false;
+  ws = new WebSocket(`${proto}://${location.host}/ws?role=${encodeURIComponent(role)}`);
+  ws.onmessage = (ev) => {
+    // Draw only the newest snapshot (on the next frame), so a slow frame never builds up a
+    // queue of stale ones; keep every snapshot's messages.
+    const snapshot = JSON.parse(ev.data);
+    pendingEvents.push(...snapshot.events);
+    pending = snapshot;
+  };
+  ws.onclose = () => {
+    if (!leaving) toast("end", "Disconnected from the server. Reload to play again.");
+  };
 }
 
 function send(msg) {
@@ -263,6 +308,11 @@ function render(s) {
   town.update(s);
   renderScore(match);
   renderHud(s);
+  renderTimer(s, match);
+  renderCountdown(s, match);
+  renderToggle(s);
+  drawMinimap(s);
+  renderPingArrow(s);
   cam.target = s.player.pos;
   if (match.round_over && shownRound !== match.round) showResult(s, match);
   if (!match.round_over) { $("overlay").hidden = true; shownRound = null; }
@@ -471,6 +521,7 @@ function showResult(s, m) {
     $("result-text").textContent = `${text} Final score: ${score}.`;
     $("again").textContent = "New match (R)";
     $("again").dataset.action = "restart";
+    $("to-menu").hidden = false;
   } else {
     $("result-emoji").textContent = roundWon ? "🎉" : "🚨";
     $("result-title").textContent = roundWon ? "Round won!" : "Round lost!";
@@ -482,6 +533,7 @@ function showResult(s, m) {
     $("result-text").textContent = `${text} ${score}.`;
     $("again").textContent = "Next round (Enter)";
     $("again").dataset.action = "next";
+    $("to-menu").hidden = true;
   }
   $("result-stats").textContent = s.role === "dodger"
     ? `${s.clock} · ${s.stats.rides} rides · ${s.stats.tickets_bought} tickets · ` +
@@ -517,6 +569,12 @@ window.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.repeat) return;
+  if (!$("menu").hidden) return;
+  if (ev.code === "Escape") {
+    if (match && match.winner) quitToMenu();
+    else if (confirm("Leave the match and go back to the main menu?")) quitToMenu();
+    return;
+  }
   if (ev.code === "Enter" || ev.code === "NumpadEnter") { ev.preventDefault(); nextRound(); }
   else if (ev.code === "KeyE" || ev.code === "Space") {
     ev.preventDefault(); send({ type: "use" });
@@ -550,5 +608,231 @@ $("again").addEventListener("click", () => {
   else nextRound();
 });
 $("follow").addEventListener("click", () => setFollow(true));
+$("to-menu").addEventListener("click", quitToMenu);
+$("ride-toggle").addEventListener("click", () => send({ type: "use" }));
+for (const button of document.querySelectorAll("#menu [data-role]")) {
+  button.addEventListener("click", () => startMatch(button.dataset.role));
+}
+
+// --- round timer and countdown ------------------------------------------------------------
+
+function renderTimer(s, m) {
+  $("topbar").hidden = false;
+  const real = s.remaining_s / world.time_scale;
+  $("round-timer").textContent = mmss(real);
+  $("round-timer").parentElement.classList.toggle("low", real <= 30 && s.status === "running");
+  $("round-label").textContent =
+    m.overtime ? `Overtime ${m.round}` : `Round ${m.round}/${m.regulation}`;
+}
+
+function renderCountdown(s, m) {
+  const left = s.freeze_s || 0;
+  $("countdown").hidden = left <= 0;
+  if (left <= 0) return;
+  const n = String(Math.ceil(left));
+  const el = $("countdown-number");
+  if (el.textContent !== n) {
+    el.textContent = n;
+    el.style.animation = "none";
+    void el.offsetWidth; // restart the pop
+    el.style.animation = "";
+  }
+  $("countdown-what").textContent =
+    `Round ${m.round} · you are the ${ROLE_LABEL[m.role]} · ${world.name}`;
+}
+
+// --- get on / get off switch (blue: riding or getting on, red: getting off) ----------------
+
+function renderToggle(s) {
+  const el = $("ride-toggle");
+  let state = null;
+  let title = "";
+  let detail = "";
+  if (s.ride) {
+    const r = s.ride;
+    if (r.fined) {
+      state = "off-req locked"; title = "GETTING OFF";
+      detail = `Inspectors: off at ${r.alight_at}`;
+    } else if (r.alight_at) {
+      state = "off-req"; title = "GETTING OFF"; detail = `at ${r.alight_at} · tap to stay on`;
+    } else {
+      state = "on"; title = "ON BOARD"; detail = `${r.route} → ${r.headsign} · tap to get off`;
+    }
+  } else if (s.waiting) {
+    state = "on"; title = "GETTING ON";
+    detail = `${s.waiting.route} in ${mmss(s.waiting.in_s / world.time_scale)} · tap to cancel`;
+  } else if (s.stop && s.stop.departures.length && s.player.state === "walk") {
+    state = ""; title = "GET ON";
+    const d = s.stop.departures[0];
+    detail = `${d.route} → ${d.headsign} · tap or E`;
+  }
+  el.hidden = state === null || s.status !== "running";
+  if (el.hidden) return;
+  el.className = state;
+  $("ride-title").textContent = title;
+  $("ride-detail").textContent = detail;
+}
+
+// --- minimap: the district, you, and for Bounty Hunters the reports and the team ----------
+
+const mini = { canvas: null, ctx: null, base: null, district: -1, project: null, dpr: 1 };
+
+function setupMinimap() {
+  mini.canvas = $("minimap");
+  mini.dpr = window.devicePixelRatio || 1;
+  mini.canvas.width = 220 * mini.dpr;
+  mini.canvas.height = 220 * mini.dpr;
+  mini.ctx = mini.canvas.getContext("2d");
+}
+
+function minimapPath(c, points) {
+  c.beginPath();
+  points.forEach((p, i) => {
+    const [x, y] = mini.project(p);
+    if (i) c.lineTo(x, y); else c.moveTo(x, y);
+  });
+}
+
+function minimapBase() {
+  // The district outline, lines, stations and cafés, drawn once per district.
+  const size = 220 * mini.dpr;
+  const pad = 14 * mini.dpr;
+  const area = world.area;
+  const ring = area.kind === "polygon" ? area.vertices : world.stations.map((st) => st.pos);
+  const kx = Math.cos((world.center[0] * Math.PI) / 180);
+  const xs = ring.map(([, lon]) => lon * kx);
+  const ys = ring.map(([lat]) => lat);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const scale = (size - 2 * pad) / Math.max(x1 - x0, y1 - y0);
+  const ox = (size - (x1 - x0) * scale) / 2;
+  const oy = (size - (y1 - y0) * scale) / 2;
+  mini.project = ([lat, lon]) => [ox + (lon * kx - x0) * scale, oy + (y1 - lat) * scale];
+  mini.perMetre = scale / 111320;
+
+  const base = document.createElement("canvas");
+  base.width = base.height = size;
+  const c = base.getContext("2d");
+  c.fillStyle = "#e9dcc0";
+  c.fillRect(0, 0, size, size);
+  if (area.kind === "polygon") {
+    minimapPath(c, area.vertices);
+    c.closePath();
+    c.fillStyle = "#fffaf0";
+    c.fill();
+    c.lineWidth = 2 * mini.dpr;
+    c.setLineDash([6 * mini.dpr, 4 * mini.dpr]);
+    c.strokeStyle = INK;
+    c.stroke();
+    c.setLineDash([]);
+  }
+  c.lineCap = c.lineJoin = "round";
+  c.globalAlpha = 0.7;
+  c.lineWidth = 2.2 * mini.dpr;
+  for (const line of world.lines) {
+    minimapPath(c, line.path);
+    c.strokeStyle = MODE_COLORS[line.mode] || "#888";
+    c.stroke();
+  }
+  c.globalAlpha = 1;
+  for (const st of world.stations) {
+    const [x, y] = mini.project(st.pos);
+    c.beginPath();
+    c.arc(x, y, 2.2 * mini.dpr, 0, 2 * Math.PI);
+    c.fillStyle = "#fff";
+    c.fill();
+    c.lineWidth = 1.2 * mini.dpr;
+    c.strokeStyle = INK;
+    c.stroke();
+  }
+  c.fillStyle = "#8b5a2b";
+  for (const cafe of world.cafes || []) {
+    const [x, y] = mini.project(cafe.pos);
+    c.fillRect(x - 3 * mini.dpr, y - 3 * mini.dpr, 6 * mini.dpr, 6 * mini.dpr);
+  }
+  mini.base = base;
+  mini.district = district;
+}
+
+function miniDot(c, pos, color, radius, ring = INK) {
+  const [x, y] = mini.project(pos);
+  c.beginPath();
+  c.arc(x, y, radius * mini.dpr, 0, 2 * Math.PI);
+  c.fillStyle = color;
+  c.fill();
+  c.lineWidth = 2 * mini.dpr;
+  c.strokeStyle = ring;
+  c.stroke();
+}
+
+function drawMinimap(s) {
+  mini.canvas.hidden = false;
+  if (mini.district !== district) minimapBase();
+  const c = mini.ctx;
+  c.drawImage(mini.base, 0, 0);
+  if (s.role === "hunter") {
+    if (s.ping) {
+      // Where the Dodger was last reported: a circle that fades and grows with its age.
+      const [x, y] = mini.project(s.ping.pos);
+      const fresh = Math.max(0, 1 - s.ping.age_s / world.ping_every_s);
+      const r = Math.max(6 * mini.dpr, (60 + s.ping.age_s * 1.4) * mini.perMetre);
+      c.beginPath();
+      c.arc(x, y, r, 0, 2 * Math.PI);
+      c.fillStyle = `rgba(224, 49, 49, ${0.12 + 0.2 * fresh})`;
+      c.fill();
+      c.lineWidth = 2 * mini.dpr;
+      c.strokeStyle = `rgba(224, 49, 49, ${0.4 + 0.6 * fresh})`;
+      c.stroke();
+      c.font = `700 ${13 * mini.dpr}px Fredoka, sans-serif`;
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.fillStyle = INK;
+      c.fillText("?", x, y);
+    }
+    for (const h of s.hunters) miniDot(c, h.pos, "#ffa8a8", 4);
+    if (s.dodger) miniDot(c, s.dodger.pos, "#ffd43b", 5);
+    miniDot(c, s.player.pos, "#fa5252", 5.5, "#fff");
+  } else {
+    // The Dodger's map shows where you are, never the Bounty Hunters.
+    miniDot(c, s.player.pos, "#40c057", 5.5, "#fff");
+  }
+}
+
+// --- arrow at the screen edge towards the latest report (Bounty Hunters) -------------------
+
+function metresBetween([lat1, lon1], [lat2, lon2]) {
+  const k = Math.cos((((lat1 + lat2) / 2) * Math.PI) / 180);
+  return Math.hypot((lat2 - lat1) * 111320, (lon2 - lon1) * 111320 * k);
+}
+
+function renderPingArrow(s) {
+  const el = $("ping-arrow");
+  if (s.role !== "hunter" || !s.ping || s.status !== "running") { el.hidden = true; return; }
+  const box = map.getContainer().getBoundingClientRect();
+  const p = map.project(lngLat(s.ping.pos));
+  // The frame the arrow runs along: clear of the top bar and the bottom controls.
+  const left = 60;
+  const right = box.width - 60;
+  const top = 110;
+  const bottom = box.height - 120;
+  const inside = p.x > left && p.x < right && p.y > top && p.y < bottom;
+  const cx = box.width / 2;
+  const cy = box.height / 2;
+  const dx = p.x - cx;
+  const dy = p.y - cy;
+  if (inside || !Number.isFinite(dx) || !Number.isFinite(dy) || (!dx && !dy)) {
+    el.hidden = true;
+    return;
+  }
+  const tx = dx > 0 ? (right - cx) / dx : dx < 0 ? (left - cx) / dx : Infinity;
+  const ty = dy > 0 ? (bottom - cy) / dy : dy < 0 ? (top - cy) / dy : Infinity;
+  const t = Math.min(tx, ty);
+  el.style.left = `${cx + dx * t}px`;
+  el.style.top = `${cy + dy * t}px`;
+  $("ping-pointer").style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+  const m = metresBetween(s.player.pos, s.ping.pos);
+  $("ping-dist").textContent = m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+  el.hidden = false;
+}
 
 init();
+

@@ -39,6 +39,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Live game: coffee. Real cafés from OpenStreetMap, 4 per district. Press C: 500 Ft and 3
   seconds standing still, then 20 seconds at 16 km/h (the Dodger only). Overpass downloads
   fall back to mirrors. ADR 0009.
+- Live game: main menu (pick your starting side, Esc to return), a CS-style top bar with the
+  round timer, a 3-second countdown before each round, a minimap (with the reports and your
+  team for Bounty Hunters; never the hunters for the Dodger), an edge arrow pointing hunters
+  at the latest report, a blue/red get-on/get-off switch, cancelling a get-off with E,
+  Bounty Hunters always two more than the Dodgers (`hunter_extra`), parks and squares walkable
+  in any direction, and vehicles that appear facing their direction of travel. ADR 0010.
 
 ## [0.1.0] - 2026-10-28
 

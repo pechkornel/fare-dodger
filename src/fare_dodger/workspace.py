@@ -36,6 +36,10 @@ class Workspace:
     def cafes_file(self) -> Path:
         return self.root / "osm" / "cafes.json"
 
+    @property
+    def parks_file(self) -> Path:
+        return self.root / "osm" / "parks.json"
+
     def feed_dir(self) -> tuple[Path, str]:
         """Extracted feed directory and a fingerprint identifying the feed contents."""
         zip_path = self.gtfs_dir / ZIP_NAME

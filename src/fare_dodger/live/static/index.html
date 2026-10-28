@@ -16,11 +16,6 @@
 
   <div id="hud" class="panel">
     <div class="logo">Bliccelő <span>fare dodger</span></div>
-    <div class="scoreboard">
-      <span class="team you">You <b id="score-you">0</b></span>
-      <span class="vs">:</span>
-      <span class="team bots"><b id="score-bots">0</b> Bots</span>
-    </div>
     <div class="round-row">
       <span id="round" class="muted"></span>
       <span id="role" class="chip role"></span>
@@ -45,12 +40,35 @@
     <div id="stop" class="stop"></div>
   </div>
 
+  <!-- CS-style top bar: score either side of the round timer. -->
+  <div id="topbar" class="panel" hidden>
+    <span class="team you">You <b id="score-you">0</b></span>
+    <span class="timer"><b id="round-timer">0:00</b><small id="round-label"></small></span>
+    <span class="team bots"><b id="score-bots">0</b> Bots</span>
+  </div>
+
+  <canvas id="minimap" class="panel" width="220" height="220" hidden></canvas>
+  <div id="ping-arrow" hidden>
+    <span class="arrow"><i id="ping-pointer">➤</i></span><span id="ping-dist"></span>
+  </div>
+
+  <!-- Get on / get off switch: blue to ride, red to get off. Click it or press E. -->
+  <button id="ride-toggle" type="button" hidden>
+    <span class="track"><span class="knob"></span></span>
+    <span class="label"><b id="ride-title"></b><small id="ride-detail"></small></span>
+  </button>
+
+  <div id="countdown" hidden>
+    <div class="number" id="countdown-number">3</div>
+    <div class="what" id="countdown-what"></div>
+  </div>
+
   <div id="feed"></div>
   <div id="burst" hidden><span id="burst-text"></span></div>
 
   <div id="help" class="panel">
     <b>WASD</b> walk · <b>E</b> wait / get off · <b>1–6</b> pick a departure ·
-    <b>T</b> buy ticket · <b>C</b> coffee · <b>+/−</b> or wheel zoom · <b>Enter</b> next round · <b>F</b> follow · <b>R</b> new match
+    <b>T</b> buy ticket · <b>C</b> coffee · <b>+/−</b> or wheel zoom · <b>Enter</b> next round · <b>F</b> follow · <b>Esc</b> menu
   </div>
 
   <button id="follow" class="panel" type="button" hidden>Follow me (F)</button>
@@ -63,6 +81,33 @@
       <p id="result-stats" class="muted"></p>
       <div id="history" class="history"></div>
       <button id="again" type="button">Next round (Enter)</button>
+      <button id="to-menu" class="secondary" type="button" hidden>Main menu</button>
+    </div>
+  </div>
+
+  <div id="menu">
+    <div class="panel card menu-card">
+      <div class="menu-logo">Bliccelő</div>
+      <div class="menu-sub">Fare Dodger · real Budapest timetables</div>
+      <div class="menu-buttons">
+        <button type="button" data-role="dodger">🏃 Play · start as the Dodger</button>
+        <button type="button" data-role="hunter" class="hunter">🤠 Play · start as a Bounty Hunter</button>
+      </div>
+      <details class="how">
+        <summary>How to play</summary>
+        <ul>
+          <li>A match is played in rounds of about 4 minutes, each on a different district. First
+            to 6 rounds wins; you switch sides at halftime, and at 5–5 every round until one team
+            leads by two.</li>
+          <li><b>Dodger:</b> survive the round. Jog the streets (freely across parks), ride real
+            trams, buses and metros, and stay out of the Bounty Hunters' reach. Buy a ticket
+            (<b>T</b>) or risk the inspectors; grab a coffee (<b>C</b>) at a ☕ to run fast.</li>
+          <li><b>Bounty Hunter:</b> catch the Dodger on foot or on the same vehicle. You only see
+            them up close; follow the reports on the minimap and the arrow at the screen edge.</li>
+          <li><b>WASD</b> move · <b>E</b> or the switch (bottom right) get on / get off / stay on
+            · <b>1–6</b> pick a departure · <b>+/−</b> zoom · <b>Esc</b> back here.</li>
+        </ul>
+      </details>
     </div>
   </div>
 
