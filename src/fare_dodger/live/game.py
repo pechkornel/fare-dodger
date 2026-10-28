@@ -98,6 +98,11 @@ class Traveller:
     fines: int = 0
     #: Held at a stop until this time while a fine is processed.
     held_until: float | None = None
+    #: Standing at a café until this time while a coffee is made.
+    brewing_until: float | None = None
+    #: Running on coffee until this time.
+    boosted_until: float | None = None
+    coffees: int = 0
     #: Where on the street graph, when walking on streets (``None``: snap on the next step).
     street: EdgePos | None = None
     follower: RouteFollower = field(default_factory=RouteFollower)
@@ -189,7 +194,7 @@ class LiveGame:
     # --- input (the human player) ----------------------------------------------------------
 
     def stop_of(self, who: Traveller) -> int | None:
-        if who.ride is not None or who.held_until is not None:
+        if who.ride is not None or who.held_until is not None or who.brewing_until is not None:
             return None
         return self.world.nearest_stop(who.pos, self.cfg.board_radius_m)
 
@@ -201,6 +206,40 @@ class LiveGame:
         if stop is None:
             return []
         return self.world.departures(stop, self.t, DEPARTURE_HORIZON_S, DEPARTURE_LIMIT)
+
+    def cafe_at(self, who: Traveller) -> int | None:
+        """The café ``who`` is standing at (on foot), if any."""
+        if who.ride is not None or who.held_until is not None:
+            return None
+        best, best_d = None, self.cfg.cafe_radius_m
+        for i, cafe in enumerate(self.world.cafes):
+            d = distance(who.pos, cafe.pos)
+            if d <= best_d:
+                best, best_d = i, d
+        return best
+
+    def buy_coffee(self) -> None:
+        """Buy a coffee at the café: stand still while it is made, then run fast for a while."""
+        p, cfg = self.player, self.cfg
+        if self.status is not Status.RUNNING or p.brewing_until is not None:
+            return
+        if not p.pays_fares:
+            self._emit("info", "Bounty Hunters are on duty: no coffee breaks.")
+            return
+        cafe = self.cafe_at(p)
+        if cafe is None:
+            self._emit("info", "Find a café first (☕ on the map).")
+        elif p.money < cfg.coffee_price_ft:
+            self._emit("info", f"Not enough money: a coffee costs {cfg.coffee_price_ft} Ft.")
+        else:
+            p.money -= cfg.coffee_price_ft
+            p.waiting_for = None
+            p.brewing_until = self.t + cfg.coffee_brew_s
+            self._emit(
+                "coffee",
+                f"One coffee at {self.world.cafes[cafe].name} ({cfg.coffee_price_ft} Ft), "
+                "coming up…",
+            )
 
     def buy_ticket(self) -> None:
         """Buy a single ticket at the stop's machine."""
@@ -230,7 +269,7 @@ class LiveGame:
         if self.status is not Status.RUNNING:
             return
         p = self.player
-        if p.held_until is not None:
+        if p.held_until is not None or p.brewing_until is not None:
             return
         if p.ride is not None:
             if p.ride.fined:
@@ -247,6 +286,9 @@ class LiveGame:
         """Wait at the current stop for departure ``index`` of the listed departures."""
         p = self.player
         if self.status is not Status.RUNNING or p.ride is not None or p.held_until is not None:
+            return
+        if p.brewing_until is not None:
+            self._emit("info", "Your coffee is nearly ready…")
             return
         departures = self.departures()
         if self.current_stop() is None:
@@ -310,9 +352,19 @@ class LiveGame:
         """Advance ``who`` by ``h`` seconds: walking along ``direction`` (a unit vector) or
         straight towards ``target``, or waiting, boarding, riding and paying fines."""
         world = self.world
+        if who.boosted_until is not None and self.t >= who.boosted_until:
+            who.boosted_until = None
+            self._tell(who, "coffee", "The coffee wore off.")
         if who.held_until is not None:
             if self.t >= who.held_until:
                 self._pay_fine(who)
+            return
+        if who.brewing_until is not None:
+            if self.t >= who.brewing_until:
+                who.brewing_until = None
+                who.boosted_until = self.t + self.cfg.coffee_boost_s
+                who.coffees += 1
+                self._tell(who, "coffee", "☕ Coffee! You're running fast for a while.")
             return
         if who.ride is not None:
             self._ride(who, who.ride)
@@ -333,7 +385,8 @@ class LiveGame:
                 if who.pays_fares:
                     self._board(who, who.ride, dep)
                 return
-        step = self.cfg.walk_speed_mps * h
+        boosted = who.boosted_until is not None
+        step = (self.cfg.coffee_speed_mps if boosted else self.cfg.walk_speed_mps) * h
         if world.streets is not None:
             self._walk_streets(who, step, direction, target)
             return
@@ -557,6 +610,15 @@ class LiveGame:
             "player": {"pos": self._latlon(p.pos), "state": state_name},
             "wallet": {"money": p.money, "tickets": p.tickets} if p.pays_fares else None,
             "held_s": round(p.held_until - t) if p.held_until is not None else None,
+            "coffee": {
+                "cafe": (
+                    self.world.cafes[cafe_here].name
+                    if (cafe_here := self.cafe_at(p)) is not None and p.pays_fares
+                    else None
+                ),
+                "brewing_s": round(p.brewing_until - t) if p.brewing_until is not None else None,
+                "boost_s": round(p.boosted_until - t) if p.boosted_until is not None else None,
+            },
             "waiting": (
                 {
                     "route": waiting.route,
@@ -635,4 +697,10 @@ def world_view(world: World, cfg: LiveConfig) -> dict[str, Any]:
         "board_radius_m": cfg.board_radius_m,
         "ticket_price_ft": cfg.ticket_price_ft,
         "fine_ft": cfg.fine_ft,
+        "cafes": [
+            {"name": c.name, "pos": [round(v, 6) for v in world.proj.to_latlon(c.pos)]}
+            for c in world.cafes
+        ],
+        "coffee_price_ft": cfg.coffee_price_ft,
+        "coffee_boost_s": cfg.coffee_boost_s,
     }

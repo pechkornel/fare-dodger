@@ -58,6 +58,8 @@ CS-style.
   the next stop. **Enter** starts the next round.
 - **As the Dodger:** survive. Buy a ticket at a stop with **T** (450 Ft of your 2,000 Ft), or
   *bliccel* and ride without one.
+  - Real cafés (☕ on the map) sell coffee with **C**: 500 Ft and 3 seconds standing still,
+    then 20 seconds running almost as fast as a bus.
   - Ticket inspectors ride about 35% of the trips, and you only find out once you are aboard.
   - Without a ticket, you are put off at the next stop and held while the fine is written,
     and the Bounty Hunters are told where you are. If you can't pay, you lose the round.
@@ -71,8 +73,9 @@ CS-style.
 
 See [ADR 0005](docs/decisions/0005-live-prototype.md),
 [ADR 0006](docs/decisions/0006-live-matches.md),
-[ADR 0007](docs/decisions/0007-street-walking-and-pace.md) and
-[ADR 0008](docs/decisions/0008-toy-town-graphics.md).
+[ADR 0007](docs/decisions/0007-street-walking-and-pace.md),
+[ADR 0008](docs/decisions/0008-toy-town-graphics.md) and
+[ADR 0009](docs/decisions/0009-coffee.md).
 
 Every command takes `-c configs/default.toml`, which documents every network and rule
 setting. `--rule key=value` overrides a single rule for a simulation. The config pins the

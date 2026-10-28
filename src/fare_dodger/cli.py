@@ -12,6 +12,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 import uvicorn
 
@@ -20,9 +21,11 @@ from fare_dodger.bots import DODGER_BOTS, INSPECTOR_BOTS
 from fare_dodger.config import NetworkConfig, RulesConfig
 from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
+from fare_dodger.live.cafes import download_cafes, pick_cafes, read_cafes
 from fare_dodger.live.match import District
 from fare_dodger.live.server import create_app
 from fare_dodger.live.streets import (
+    BBox,
     StreetGraph,
     area_bbox,
     covering_bbox,
@@ -294,6 +297,20 @@ def sim(
 LIVE_CONFIG = Path("configs/live.toml")
 
 
+def _load_cafes(workspace: Workspace, bbox: BBox) -> list[tuple[str, float, float]]:
+    """Cafés from OpenStreetMap, downloaded once; none (with a warning) if that fails."""
+    cafes = read_cafes(workspace.cafes_file, bbox)
+    if cafes is None:
+        typer.echo("downloading cafés from OpenStreetMap (Overpass)...", err=True)
+        try:
+            download_cafes(workspace.cafes_file, bbox)
+        except httpx.HTTPError as exc:
+            typer.echo(f"  no cafés this time ({exc}); playing without coffee", err=True)
+            return []
+        cafes = read_cafes(workspace.cafes_file, bbox) or []
+    return cafes
+
+
 @app.command()
 def play(
     config: Annotated[
@@ -330,6 +347,7 @@ def play(
             typer.echo("downloading streets from OpenStreetMap (Overpass, ~1 min)...", err=True)
             download_streets(workspace.streets_file, bbox)
             osm = read_streets(workspace.streets_file, bbox)
+    cafes = _load_cafes(workspace, covering_bbox([area_bbox(net.area) for _, net in nets]))
     districts = []
     for name, net in nets:
         started = time.perf_counter()
@@ -337,8 +355,10 @@ def play(
         world = World(tt, net.area, workspace.vehicle_paths(net, tt))
         if osm is not None:
             world.set_streets(StreetGraph.from_osm(*osm, world.proj.to_xy, net.area.contains))
+        world.cafes = pick_cafes(cafes, world, cfg.cafes_per_district)
         districts.append(District(name, world))
         street_info = f", {len(world.streets)} street nodes" if world.streets else ""
+        street_info += f", {len(world.cafes)} cafés"
         typer.echo(
             f"  {name}: {tt.n_nodes} stations, {tt.n_patterns} patterns{street_info} "
             f"({time.perf_counter() - started:.1f}s)",

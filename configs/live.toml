@@ -43,6 +43,14 @@ inspected_share = 0.35       # trips with ticket inspectors aboard (hidden until
 fine_ft = 1000               # caught without a ticket; game over if you cannot pay
 fine_hold_s = 60             # held at the next stop while the fine is processed
 fine_alerts_hunters = true   # the inspectors report you to the Bounty Hunters
+# Coffee (the Dodger only): real cafés from OpenStreetMap, a few per district. Press C at one:
+# 500 Ft, 3 real seconds standing still, then 20 real seconds running almost as fast as a bus.
+cafes_per_district = 4
+cafe_radius_m = 25.0
+coffee_price_ft = 500
+coffee_brew_s = 18           # timetable seconds (3 real seconds at 6x)
+coffee_boost_s = 120         # timetable seconds (20 real seconds at 6x)
+coffee_speed_kmh = 16.0      # jogging is 10; buses and trams average 15-20
 # Match: first to win more than half of the regulation rounds (6 of 10); sides switch at
 # halftime; at 5-5, sides switch every round until one team leads by two.
 regulation_rounds = 10

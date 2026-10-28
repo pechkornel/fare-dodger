@@ -16,6 +16,7 @@ import itertools
 import math
 from bisect import bisect_right
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fare_dodger.config import Area
 from fare_dodger.geo import metres_per_degree
@@ -23,6 +24,9 @@ from fare_dodger.live.shapes import Hops, smooth_path
 from fare_dodger.live.streets import RouteFollower, StreetGraph, along
 from fare_dodger.modes import Mode
 from fare_dodger.network.timetable import Timetable
+
+if TYPE_CHECKING:
+    from fare_dodger.live.cafes import Cafe
 
 Point = tuple[float, float]
 
@@ -92,6 +96,8 @@ class World:
         self.streets: StreetGraph | None = None
         #: Where each station meets the street (the station itself without streets).
         self.stop_xy = list(self.node_xy)
+        #: Coffee shops (see :mod:`fare_dodger.live.cafes`).
+        self.cafes: list[Cafe] = []
         self.trip_pattern = [0] * tt.n_trips
         for p in range(tt.n_patterns):
             for trip in range(tt.pat_trip_ptr[p], tt.pat_trip_ptr[p + 1]):

@@ -171,3 +171,17 @@ def test_a_tight_bend_is_walked_round_holding_one_key() -> None:
     for _ in range(40):
         ep = graph.move(ep, NORTH, 5.0)  # north takes the bend and then the street north
     assert graph.point(ep) == pytest.approx((80.0, 125.0))
+
+
+def test_overpass_falls_back_to_a_mirror(tmp_path: Path) -> None:
+    hosts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hosts.append(request.url.host)
+        if len(hosts) == 1:
+            return httpx.Response(502)
+        return httpx.Response(200, json={"elements": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    download_streets(tmp_path / "streets.json", (47.0, 19.0, 47.1, 19.1), client)
+    assert len(hosts) == 2 and hosts[0] != hosts[1]

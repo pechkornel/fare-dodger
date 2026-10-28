@@ -182,7 +182,18 @@ function drawStatic(w) {
     { color: MODE_COLORS[line.mode] || "#888" }))));
   map.getSource("stations").setData(fc(w.stations.map((st) => feature(
     { type: "Point", coordinates: lngLat(st.pos) }, { name: st.name }))));
+  // Café signs stay visible in the 3D town too (they are not ``.entity`` markers).
+  for (const m of cafeMarkers) m.remove();
+  cafeMarkers = (w.cafes || []).map((cafe) => {
+    const el = document.createElement("div");
+    el.className = "cafe-sign";
+    el.title = `${cafe.name}: coffee ${w.coffee_price_ft} Ft (C)`;
+    el.textContent = "☕";
+    return new maplibregl.Marker({ element: el }).setLngLat(lngLat(cafe.pos)).addTo(map);
+  });
 }
+
+let cafeMarkers = [];
 
 /** Ring of [lon, lat] approximating a circle of ``radius`` metres. */
 function circle([lat, lon], radius) {
@@ -363,6 +374,9 @@ function renderHud(s) {
     setChip("money", s.wallet.money);
     setChip("tickets", s.wallet.tickets);
   }
+  const coffee = s.coffee || {};
+  $("boost").hidden = coffee.boost_s == null;
+  if (coffee.boost_s != null) $("boost-s").textContent = mmss(coffee.boost_s / world.time_scale);
   $("radar-label").textContent = hunter ? "📡 next report" : "🤠 radar";
   const frac = 1 - s.next_ping_s / world.ping_every_s;
   $("ping-bar").style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
@@ -393,17 +407,27 @@ function renderHud(s) {
     status = `📝 The inspectors are writing your fine… ` +
       `<b>${mmss(s.held_s / world.time_scale)}</b><br>` +
       `<span class="muted">${world.fine_ft} Ft, and the Bounty Hunters know where you are!</span>`;
+  } else if (coffee.brewing_s != null) {
+    status = `☕ Making your coffee… <b>${mmss(coffee.brewing_s / world.time_scale)}</b><br>` +
+      '<span class="muted">Stand still. Keep an eye out for Bounty Hunters!</span>';
   } else if (s.waiting) {
     status = `Waiting for ${esc(s.waiting.route)} → ${esc(s.waiting.headsign)} ` +
       `<span class="muted">(${mmss(s.waiting.in_s / world.time_scale)}, E to cancel)</span>` +
       (s.wallet && !s.wallet.tickets ? '<br><span class="danger">No ticket: risky!</span>' : "");
   } else {
-    status = "On foot" + (s.stop ? "" : ' <span class="muted">· walk to a stop to ride</span>');
+    status = (coffee.boost_s != null ? "☕ Running on coffee" : "On foot") +
+      (s.stop || coffee.cafe ? "" : ' <span class="muted">· walk to a stop to ride</span>');
   }
   $("status").innerHTML = status;
   $("status").className = held ? "status held" : "status";
 
-  if (!s.stop) { $("stop").innerHTML = ""; return; }
+  const cafe = coffee.cafe && coffee.brewing_s == null
+    ? `<h3><span>☕ ${esc(coffee.cafe)}</span>` +
+      `<span class="chip" id="coffee">C · ☕ ${world.coffee_price_ft} Ft</span></h3>` +
+      `<div class="muted">Runs you almost bus-fast for ` +
+      `${mmss(world.coffee_boost_s / world.time_scale)}.</div>`
+    : "";
+  if (!s.stop) { $("stop").innerHTML = cafe; return; }
   const rows = s.stop.departures.map((d, i) =>
     `<div class="dep${d.waiting ? " waiting" : ""}"><span class="key">${i + 1}</span>` +
     pill(d.mode, d.route) +
@@ -411,7 +435,7 @@ function renderHud(s) {
     `<span class="in">${d.in_s <= 0 ? "now" : mmss(d.in_s / world.time_scale)}</span></div>`);
   const buy = s.wallet
     ? `<span class="chip" id="buy">T · 🎫 ${world.ticket_price_ft} Ft</span>` : "";
-  $("stop").innerHTML = `<h3><span>🚏 ${esc(s.stop.name)}</span>${buy}</h3>` +
+  $("stop").innerHTML = cafe + `<h3><span>🚏 ${esc(s.stop.name)}</span>${buy}</h3>` +
     (rows.length ? rows.join("") : '<div class="muted">No departures soon.</div>');
 }
 
@@ -499,6 +523,7 @@ window.addEventListener("keydown", (ev) => {
   }
   else if (/^Digit[1-6]$/.test(ev.code)) send({ type: "wait", index: Number(ev.code.slice(5)) - 1 });
   else if (ev.code === "KeyT") send({ type: "ticket" });
+  else if (ev.code === "KeyC") send({ type: "coffee" });
   else if (ev.code === "KeyF") setFollow(true);
   else if (ev.code === "Equal" || ev.code === "NumpadAdd") zoomBy(1);
   else if (ev.code === "Minus" || ev.code === "NumpadSubtract") zoomBy(-1);
@@ -518,6 +543,7 @@ window.addEventListener("blur", () => {
 // The stop panel is redrawn every snapshot, so a click (down and up on one element) can miss.
 $("stop").addEventListener("pointerdown", (ev) => {
   if (ev.target.closest("#buy")) send({ type: "ticket" });
+  if (ev.target.closest("#coffee")) send({ type: "coffee" });
 });
 $("again").addEventListener("click", () => {
   if ($("again").dataset.action === "restart") restart();

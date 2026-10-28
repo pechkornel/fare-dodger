@@ -240,6 +240,16 @@ class LiveConfig(_Frozen):
     fine_hold_s: int = Field(default=60, ge=0)
     #: The inspectors report a fined Dodger's position to the Bounty Hunters.
     fine_alerts_hunters: bool = True
+    #: Coffee (the Dodger only): bought at a café for ``coffee_price_ft``, made in
+    #: ``coffee_brew_s`` (standing still), then running at ``coffee_speed_kmh`` for
+    #: ``coffee_boost_s`` (timetable seconds; at 6x, 3 and 20 real seconds).
+    cafes_per_district: int = Field(default=4, ge=0)
+    cafe_radius_m: float = Field(default=25.0, gt=0)
+    coffee_price_ft: int = Field(default=500, ge=0)
+    coffee_brew_s: int = Field(default=18, ge=0)
+    coffee_boost_s: int = Field(default=120, gt=0)
+    #: A bit slower than the buses and trams (15-20 km/h on average), well above jogging.
+    coffee_speed_kmh: float = Field(default=16.0, gt=0)
     #: Match: the first side to win more than half of ``regulation_rounds`` takes the match.
     #: Sides switch after half of them; at a tie after regulation, sides switch every round
     #: until one team leads by two.
@@ -271,6 +281,10 @@ class LiveConfig(_Frozen):
     @property
     def walk_speed_mps(self) -> float:
         return self.walk_speed_kmh / 3.6
+
+    @property
+    def coffee_speed_mps(self) -> float:
+        return self.coffee_speed_kmh / 3.6
 
 
 def data_dir() -> Path:

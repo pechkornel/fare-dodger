@@ -33,6 +33,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Live game: detailed vehicles (articulated trolleybuses, multi-section trams, metro cars with
   bogies), redesigned characters, facade details and roof props, and smaller people next to
   bigger vehicles. `/models.html` shows every model. ADR 0008 addendum.
+- Live game: riders sit inside their vehicle (a pin floats above it), and vehicles bend at their
+  bellows and couplers along the path they drive, with some suspension motion. Zooming is
+  faster. ADR 0008 addendum.
+- Live game: coffee. Real cafés from OpenStreetMap, 4 per district. Press C: 500 Ft and 3
+  seconds standing still, then 20 seconds at 16 km/h (the Dodger only). Overpass downloads
+  fall back to mirrors. ADR 0009.
 
 ## [0.1.0] - 2026-10-28
 
