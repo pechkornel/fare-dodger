@@ -1,0 +1,25 @@
+# Default Fare Dodger configuration. Every value here is optional; omitted keys use the
+# defaults defined in src/fare_dodger/config.py.
+
+[network]
+service_date = "auto"        # or "2026-11-04"
+window_start = "07:30"       # trips outside this window are dropped at build time
+window_end = "11:30"
+modes = ["metro", "tram", "trolleybus", "bus"]   # also: "suburban_rail", "ferry"
+bus_min_departures_per_hour = 6.0
+bus_frequency_window = ["08:00", "09:00"]
+include_routes = []
+exclude_routes = []
+merge_radius_m = 150.0
+station_merge_radius_m = 300.0   # same name + one rail platform
+walk_radius_m = 400.0
+walk_speed_kmh = 5.0
+walk_detour_factor = 1.0
+change_time_s = 60
+metro_change_time_s = 120
+
+[network.area]               # "circle", "bbox" or "polygon"
+kind = "circle"
+center_lat = 47.4979         # Deák Ferenc tér
+center_lon = 19.0544
+radius_m = 4500.0

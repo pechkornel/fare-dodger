@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import sys
+import time
+from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from fare_dodger import __version__
-from fare_dodger.config import NetworkConfig, data_dir
+from fare_dodger.config import NetworkConfig
+from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
+from fare_dodger.modes import VEHICLE_MODES
+from fare_dodger.network.timetable import Timetable
+from fare_dodger.workspace import Workspace, network_config
 
 app = typer.Typer(
     name="fare-dodger",
@@ -19,6 +25,10 @@ app = typer.Typer(
     add_completion=False,
 )
 
+ConfigOpt = Annotated[
+    Path | None,
+    typer.Option("--config", "-c", exists=True, dir_okay=False, help="TOML config file"),
+]
 DataDirOpt = Annotated[
     Path | None,
     typer.Option("--data-dir", help="Where feeds and built networks are cached [default: ./data]"),
@@ -48,7 +58,7 @@ def download(
     data: DataDirOpt = None,
 ) -> None:
     """Download the GTFS feed (cached; uses a conditional request when possible)."""
-    target = (data or data_dir()) / "gtfs"
+    target = Workspace.at(data).gtfs_dir
     result = download_feed(url or NetworkConfig().gtfs_url, target, force=force)
     state = "downloaded" if result.downloaded else "up to date"
     meta = result.meta
@@ -56,3 +66,62 @@ def download(
         f"{state}: {result.zip_path} ({meta.size_bytes / 1e6:.1f} MB, "
         f"feed_version={meta.feed_version}, valid {meta.feed_start_date}..{meta.feed_end_date})"
     )
+
+
+def _open_network(config: Path | None, data: Path | None, *, rebuild: bool = False) -> Timetable:
+    started = time.perf_counter()
+    timetable, path, built = Workspace.at(data).network(network_config(config), rebuild=rebuild)
+    action = "built" if built else "loaded"
+    typer.echo(f"{action} network {path.name} in {time.perf_counter() - started:.1f}s", err=True)
+    return timetable
+
+
+@app.command()
+def build(config: ConfigOpt = None, data: DataDirOpt = None, rebuild: bool = False) -> None:
+    """Build (or load from cache) the playable network for a config."""
+    tt = _open_network(config, data, rebuild=rebuild)
+    typer.echo(
+        f"{tt.n_nodes} nodes, {tt.n_patterns} patterns, {tt.n_trips} trips, "
+        f"{tt.n_footpaths} footpaths (service day {tt.service_date}, feed {tt.feed_version})"
+    )
+
+
+@app.command()
+def info(
+    config: ConfigOpt = None,
+    data: DataDirOpt = None,
+    top: Annotated[int, typer.Option(help="How many largest stations to list")] = 10,
+) -> None:
+    """Describe the playable network: sizes, routes per mode, largest merged stations."""
+    tt = _open_network(config, data)
+    typer.echo(f"feed {tt.feed_version}, service day {tt.service_date}")
+    typer.echo(
+        f"nodes {tt.n_nodes}  patterns {tt.n_patterns}  trips {tt.n_trips}  "
+        f"footpaths {tt.n_footpaths}  stop events {len(tt.trip_arr)}"
+    )
+    typer.echo(f"dropped disconnected nodes: {tt.meta.get('dropped_disconnected_nodes', 0)}")
+    for mode, names in tt.meta.get("routes_by_mode", {}).items():
+        typer.echo(f"  {mode:<14}{len(names):>4} routes: {', '.join(names)}")
+    mode_nodes = Counter(
+        m.value
+        for n in range(tt.n_nodes)
+        for i, m in enumerate(VEHICLE_MODES)
+        if tt.node_mode_mask[n] >> i & 1
+    )
+    typer.echo("nodes served per mode: " + ", ".join(f"{k} {v}" for k, v in mode_nodes.items()))
+    typer.echo("largest merged stations (by platforms):")
+    by_size = sorted(range(tt.n_nodes), key=lambda n: (-len(tt.node_platforms[n]), n))[:top]
+    for n in by_size:
+        typer.echo(f"  {tt.node_name[n]:<40}{len(tt.node_platforms[n]):>3} platforms")
+    dup = Counter(tt.node_name)
+    repeated = sorted(name for name, c in dup.items() if c > 1)
+    typer.echo(f"names shared by several nodes: {len(repeated)}")
+    for name in repeated[:top]:
+        idx = [n for n in range(tt.n_nodes) if tt.node_name[n] == name]
+        gap = min(
+            distance_m(tt.node_lat[a], tt.node_lon[a], tt.node_lat[b], tt.node_lon[b])
+            for a in idx
+            for b in idx
+            if a < b
+        )
+        typer.echo(f"  {name:<40}{len(idx):>3} nodes, closest pair {gap:.0f} m apart")

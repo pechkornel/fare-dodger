@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Playable network build: area filter, frequency-based bus selection, station merging (ADR 0001),
+  walking transfers, FIFO route patterns, largest strongly connected component, cached `.npz` timetable.
+- `fare-dodger build` and `fare-dodger info`; `configs/default.toml`.
 - `fare-dodger download`: cached GTFS download with conditional requests and safe extraction.
 - GTFS loading for one service day and time window (polars), automatic midweek date selection.
 - Hand-designed mini GTFS fixture for offline tests.
