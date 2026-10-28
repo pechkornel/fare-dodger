@@ -21,7 +21,7 @@ from fare_dodger.network.transfers import walking_transfers
 from fare_dodger.timeutil import parse_hms
 
 #: Bump whenever the build logic changes so cached networks are rebuilt.
-BUILD_VERSION = 4
+BUILD_VERSION = 5
 
 _RAIL_MODES = frozenset({Mode.METRO, Mode.SUBURBAN_RAIL})
 
