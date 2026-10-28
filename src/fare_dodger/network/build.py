@@ -21,7 +21,7 @@ from fare_dodger.network.transfers import walking_transfers
 from fare_dodger.timeutil import parse_hms
 
 #: Bump whenever the build logic changes so cached networks are rebuilt.
-BUILD_VERSION = 5
+BUILD_VERSION = 6
 
 _RAIL_MODES = frozenset({Mode.METRO, Mode.SUBURBAN_RAIL})
 
@@ -94,7 +94,9 @@ def build_timetable(feed: RawFeed, cfg: NetworkConfig) -> Timetable:
     rail_stops = set(rows.filter(pl.col("trip_id").is_in(sorted(rail_trips)))["stop_id"])
     used = sorted(set(rows["stop_id"].unique()))
     merged_input = [replace(platforms[s], is_rail=s in rail_stops) for s in used]
-    clusters = merge_platforms(merged_input, cfg.merge_radius_m, cfg.station_merge_radius_m)
+    clusters = merge_platforms(
+        merged_input, cfg.merge_radius_m, cfg.station_merge_radius_m, cfg.station_merge_overrides
+    )
     cluster_of = {pid: i for i, c in enumerate(clusters) for pid in c.platform_ids}
 
     raw_trips: list[TripSequence] = []

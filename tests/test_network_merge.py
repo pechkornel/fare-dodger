@@ -66,3 +66,11 @@ def test_merging_is_transitive_and_deterministic() -> None:
     assert first == merge_platforms(list(reversed(chain)), 150)
     assert first[0].platform_ids == ("a", "b", "c")
     assert first[0].name == "X"
+
+
+def test_name_override_widens_radius_for_that_name_only() -> None:
+    stops = [p("a", "X"), p("b", "X", 250), p("c", "Y"), p("d", "Y", 250)]
+    merged = merge_platforms(stops, 150, station_radius_m=300, name_radius_m={"X": 300})
+    assert [c.platform_ids for c in merged] == [("a", "b"), ("c",), ("d",)]
+    # An override never shrinks the automatic radius.
+    assert len(merge_platforms(stops[:2], 300, name_radius_m={"X": 100})) == 1

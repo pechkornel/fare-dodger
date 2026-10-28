@@ -39,7 +39,10 @@ uv run fare-dodger sim --dodger greedy --inspectors belief --rule reveal_modes=t
 ```
 
 Every command takes `-c configs/default.toml`, which documents every network and rule
-setting. `--rule key=value` overrides a single rule for a simulation.
+setting. `--rule key=value` overrides a single rule for a simulation. The config pins the
+service date and applies the manual station merges in `configs/station_overrides.toml`, so
+pass it to reproduce published numbers. Without `-c`, the service day is picked
+automatically from whatever feed is downloaded and no station overrides are applied.
 
 ## Architecture
 
@@ -65,8 +68,8 @@ are tracked in [`docs/plan.md`](docs/plan.md).
 
 ## Numbers
 
-On the default network (feed 2821.20261028, service day 2026-11-17): 434 stations, 205
-route patterns, 5,401 trips and 1,964 footpaths.
+On the default network (feed 2821.20261028, pinned service day 2026-11-17): 421 stations,
+204 route patterns, 5,401 trips and 1,886 footpaths.
 
 | | |
 |---|---|

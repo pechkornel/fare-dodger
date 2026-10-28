@@ -1,8 +1,11 @@
 # Default Fare Dodger configuration. Every value here is optional; omitted keys use the
-# defaults defined in src/fare_dodger/config.py.
+# defaults defined in src/fare_dodger/config.py. Two values differ from those defaults so
+# published results are reproducible: the pinned service_date and the station overrides.
 
 [network]
-service_date = "auto"        # or "2026-11-04"
+# A Tuesday in feed 2821.20261028 (valid 2026-10-26 to 2026-12-01), pinned for reproducible
+# simulations. "auto" picks the busiest Tue/Wed/Thu of whatever feed is downloaded.
+service_date = "2026-11-17"
 window_start = "07:30"       # trips outside this window are dropped at build time
 window_end = "11:30"
 modes = ["metro", "tram", "trolleybus", "bus"]   # also: "suburban_rail", "ferry"
@@ -12,6 +15,7 @@ include_routes = []
 exclude_routes = []
 merge_radius_m = 150.0
 station_merge_radius_m = 300.0   # same name + one rail platform
+station_overrides = "station_overrides.toml"   # manual merges, relative to this file
 walk_radius_m = 400.0
 walk_speed_kmh = 5.0
 walk_detour_factor = 1.0
