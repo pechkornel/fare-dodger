@@ -7,24 +7,28 @@ import statistics
 import sys
 import time
 import tomllib
+import webbrowser
 from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
 import typer
+import uvicorn
 
 from fare_dodger import __version__
 from fare_dodger.bots import DODGER_BOTS, INSPECTOR_BOTS
 from fare_dodger.config import NetworkConfig, RulesConfig
 from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
+from fare_dodger.live.server import create_app
+from fare_dodger.live.world import World
 from fare_dodger.modes import VEHICLE_MODES
 from fare_dodger.network.timetable import Timetable
 from fare_dodger.routing.raptor import reachable
 from fare_dodger.sim.report import rules_summary, summarise, write_reports
 from fare_dodger.sim.runner import run_matchups
 from fare_dodger.timeutil import format_hm, parse_hms
-from fare_dodger.workspace import Workspace, network_config, rules_config
+from fare_dodger.workspace import Workspace, live_config, network_config, rules_config
 
 app = typer.Typer(
     name="fare-dodger",
@@ -271,3 +275,34 @@ def sim(
             f"catches {dict(s.catches_by_kind)}"
         )
     typer.echo(f"{len(results)} games in {elapsed:.1f}s -> " + ", ".join(str(p) for p in paths))
+
+
+LIVE_CONFIG = Path("configs/live.toml")
+
+
+@app.command()
+def play(
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", exists=True, dir_okay=False, help="TOML config file"),
+    ] = LIVE_CONFIG,
+    data: DataDirOpt = None,
+    host: Annotated[str, typer.Option(help="Interface to listen on")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port to listen on")] = 8000,
+    seed: Annotated[int | None, typer.Option(help="Fixed game seed (default: random)")] = None,
+    open_browser: Annotated[
+        bool, typer.Option("--open", help="Open the game in a browser")
+    ] = False,
+) -> None:
+    """Play the live prototype in the browser: walk with WASD, ride real trams and buses."""
+    net = network_config(config)
+    cfg = live_config(config)
+    if seed is not None:
+        cfg = cfg.model_copy(update={"seed": seed})
+    tt = _open_network(config, data)
+    app_ = create_app(World(tt, net.area), cfg)
+    url = f"http://{host}:{port}/"
+    typer.echo(f"Fare Dodger live: {tt.n_nodes} stations. Open {url} (Ctrl+C to stop)")
+    if open_browser:
+        webbrowser.open(url)
+    uvicorn.run(app_, host=host, port=port, log_level="warning")
