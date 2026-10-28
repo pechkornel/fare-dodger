@@ -1086,10 +1086,15 @@ export class ToyTown {
       key: `hunter${i}`, kind: role === "hunter" ? "team" : "hunter", pos: h.pos,
       state: h.riding ? "ride" : "walk", alert: h.chasing,
     }));
-    if (s.dodger) {
-      people.push({ key: "dodger", kind: "wanted", pos: s.dodger.pos,
-        state: s.dodger.held ? "held" : "walk", alert: true });
-    }
+    // Other Dodgers: teammates when you run, the ones in sight when you hunt. The caught
+    // are out of the round.
+    (s.dodgers || []).forEach((d, i) => {
+      if (d.caught) return;
+      people.push({
+        key: `dodger${i}`, kind: role === "hunter" ? "wanted" : "dodger", pos: d.pos,
+        state: d.riding ? "ride" : d.held ? "held" : "walk", alert: role === "hunter",
+      });
+    });
     const keys = new Set();
     for (const p of people) {
       keys.add(p.key);

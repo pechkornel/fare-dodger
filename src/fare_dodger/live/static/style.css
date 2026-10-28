@@ -258,6 +258,39 @@ body.in-menu #follow { display: none !important; }
 .menu-buttons button { width: 100%; margin: 0; }
 .menu-buttons button.hunter { background: var(--hunter); }
 .card button.secondary { background: var(--paper); color: var(--ink); }
+.field { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; text-align: left;
+  font-weight: 600; font-size: 14px; }
+.card input { padding: 9px 12px; border: 3px solid var(--ink); border-radius: 12px; font: inherit;
+  font-size: 16px; background: #fff; color: var(--ink); min-width: 0; }
+.menu-row { display: flex; align-items: center; gap: 8px; }
+.menu-row span { font-weight: 600; margin-right: auto; }
+.menu-row button { width: auto !important; flex: none; padding: 9px 14px; }
+.menu-row input { flex: 1; text-transform: uppercase; letter-spacing: 3px; font-weight: 700; }
+#menu-error { margin: 10px 0 0; }
+
+/* --- lobby ------------------------------------------------------------------------------ */
+#lobby { position: absolute; inset: 0; z-index: 3000; display: grid; place-items: center;
+  background: rgba(251, 241, 214, 0.55); backdrop-filter: blur(2px); }
+#lobby[hidden] { display: none; }
+.lobby-card { max-width: min(560px, calc(100vw - 32px)); width: 100%; }
+.lobby-code-label { font-weight: 600; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1px; font-size: 12px; }
+.lobby-code { font-size: 56px; font-weight: 700; letter-spacing: 8px; line-height: 1.1;
+  text-shadow: 3px 3px 0 var(--sun); }
+.lobby-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0 6px; }
+.lobby-team { border: 3px solid var(--ink); border-radius: 14px; padding: 10px; background: #fff;
+  text-align: left; }
+.lobby-team.mine { background: #d3f9d8; }
+.lobby-team h4 { margin: 0 0 6px; }
+.lobby-team div { padding: 3px 0; font-weight: 600; }
+.lobby-team .bot { color: var(--muted); font-weight: 500; }
+.lobby-note { font-size: 13px; }
+.lobby-buttons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.lobby-buttons button { margin-top: 4px; }
+.lobby-buttons button[hidden] { display: none; }
+
+.toon.mate { background: #8ce99a; transform: scale(0.85); }
+.toon.out { filter: grayscale(1); opacity: 0.6; }
 .how { margin-top: 14px; text-align: left; }
 .how summary { cursor: pointer; font-weight: 700; }
 .how ul { margin: 8px 0 0; padding-left: 20px; font-size: 14px; }

@@ -62,17 +62,56 @@ function showMenu() {
   $("countdown").hidden = true;
 }
 
-function startMatch(role) {
-  document.body.classList.remove("in-menu");
-  $("menu").hidden = true;
+// --- menu and lobby --------------------------------------------------------------------
+
+function playerName() {
+  const name = $("player-name").value.trim();
+  try { localStorage.setItem("fare-dodger-name", name); } catch { /* private mode */ }
+  return name;
+}
+
+function menuError(message) {
+  $("menu-error").textContent = message;
+  $("menu-error").hidden = !message;
+}
+
+// Opens a connection and says what we want: {type: "solo" | "create" | "join", ...}.
+function openGame(hello) {
+  menuError("");
   shownRound = null;
   match = null;
-  connect(role);
+  connect(hello);
+}
+
+function showLobby(lobby) {
+  $("menu").hidden = true;
+  $("lobby").hidden = false;
+  $("lobby-code").textContent = lobby.code;
+  $("lobby-size").textContent = `${lobby.size}v${lobby.size}`;
+  lobby.teams.forEach((team, t) => {
+    const rows = team.players.map((name) => `<div>👤 ${esc(name)}</div>`)
+      .concat(Array.from({ length: team.bots }, () => '<div class="bot">🤖 bot</div>'));
+    const el = $(`lobby-team-${t}`);
+    el.className = `lobby-team${t === lobby.team ? " mine" : ""}`;
+    el.innerHTML = `<h4>Team ${"AB"[t]}${t === lobby.team ? " (you)" : ""}</h4>${rows.join("")}`;
+  });
+  $("start-game").hidden = !lobby.host;
+  $("lobby-wait").hidden = lobby.host;
+  $("lobby-wait").textContent = `Waiting for ${lobby.host_name || "the host"} to start…`;
+}
+
+function enterGame() {
+  if (!$("lobby").hidden || !$("menu").hidden) {
+    $("lobby").hidden = true;
+    $("menu").hidden = true;
+    document.body.classList.remove("in-menu");
+  }
 }
 
 function quitToMenu() {
   if (ws) { leaving = true; ws.close(); ws = null; }
   for (const k of Object.keys(keys)) keys[k] = false;
+  $("lobby").hidden = true;
   showMenu();
   district = -1;
   loadDistrict(0);
@@ -254,19 +293,33 @@ function clearDynamic() {
   last.money = last.tickets = null;
 }
 
-function connect(role) {
+function connect(hello) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   leaving = false;
-  ws = new WebSocket(`${proto}://${location.host}/ws?role=${encodeURIComponent(role)}`);
-  ws.onmessage = (ev) => {
-    // Draw only the newest snapshot (on the next frame), so a slow frame never builds up a
-    // queue of stale ones; keep every snapshot's messages.
-    const snapshot = JSON.parse(ev.data);
-    pendingEvents.push(...snapshot.events);
-    pending = snapshot;
+  const socket = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = socket;
+  socket.onopen = () => socket.send(JSON.stringify(hello));
+  socket.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "error") {
+      leaving = true;
+      quitToMenu();
+      menuError(msg.message);
+    } else if (msg.type === "closed") {
+      leaving = true;
+      quitToMenu();
+      menuError(msg.message);
+    } else if (msg.type === "lobby") {
+      showLobby(msg);
+    } else {
+      // Draw only the newest snapshot (on the next frame), so a slow frame never builds up
+      // a queue of stale ones; keep every snapshot's messages.
+      pendingEvents.push(...msg.events);
+      pending = msg;
+    }
   };
-  ws.onclose = () => {
-    if (!leaving) toast("end", "Disconnected from the server. Reload to play again.");
+  socket.onclose = () => {
+    if (!leaving && ws === socket) toast("end", "Disconnected from the server. Reload to play again.");
   };
 }
 
@@ -291,6 +344,7 @@ function divMarker(pos, html, z) {
 }
 
 function render(s) {
+  enterGame();
   match = s.match;
   if (match.district !== district) {
     if (!loading) loadDistrict(match.district);
@@ -302,7 +356,7 @@ function render(s) {
   }
   renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
   renderHunters(s.hunters, s.role);
-  renderDodger(s.dodger);
+  renderDodgers(s.dodgers, s.role);
   renderGround(s);
   renderPlayer(s.player, s.role);
   town.update(s);
@@ -315,6 +369,11 @@ function render(s) {
   renderPingArrow(s);
   cam.target = s.player.pos;
   if (match.round_over && shownRound !== match.round) showResult(s, match);
+  if (match.round_over && s.room && s.room.next_round_in !== null && !s.room.host) {
+    $("again").textContent = `Next round in ${Math.ceil(s.room.next_round_in)}…`;
+  } else if (match.round_over && s.room && s.room.next_round_in !== null) {
+    $("again").textContent = `Next round in ${Math.ceil(s.room.next_round_in)} · Enter: now`;
+  }
   if (!match.round_over) { $("overlay").hidden = true; shownRound = null; }
 }
 
@@ -352,17 +411,19 @@ function renderHunters(list, role) {
   });
 }
 
-function renderDodger(dodger) {
-  if (!dodger) {
-    if (markers.dodger) { markers.dodger.remove(); markers.dodger = null; }
-    return;
-  }
-  const cls = `toon wanted${dodger.held ? " held" : ""}`;
-  if (!markers.dodger) {
-    markers.dodger = divMarker(dodger.pos, `<div class="${cls}">🏃</div>`, 950);
-  }
-  markers.dodger.setLngLat(lngLat(dodger.pos));
-  markers.dodger.getElement().firstChild.className = cls;
+// Other Dodgers: your teammates when you run, the ones in sight when you hunt.
+function renderDodgers(list, role) {
+  markers.dodgers = markers.dodgers || [];
+  while (markers.dodgers.length > list.length) markers.dodgers.pop().remove();
+  list.forEach((d, i) => {
+    const kind = role === "hunter" ? "wanted" : "mate";
+    const cls = `toon ${kind}${d.held ? " held" : ""}${d.caught ? " out" : ""}`;
+    if (!markers.dodgers[i]) {
+      markers.dodgers[i] = divMarker(d.pos, `<div class="${cls}" title="${esc(d.name)}">🏃</div>`, 950);
+    }
+    markers.dodgers[i].setLngLat(lngLat(d.pos));
+    markers.dodgers[i].getElement().firstChild.className = cls;
+  });
 }
 
 // Sight circles of the Bounty Hunters on foot and the last radar ping, drawn on the ground.
@@ -394,7 +455,8 @@ function renderPlayer(p, role) {
 
 function renderScore(m) {
   $("score-you").textContent = m.score.you;
-  $("score-bots").textContent = m.score.bots;
+  $("score-bots").textContent = m.score.them;
+  $("them-name").textContent = m.names.them;
   const round = m.overtime ? `Overtime · round ${m.round}` : `Round ${m.round} of ${m.regulation}`;
   $("round").textContent = round;
   $("role").textContent = ROLE_LABEL[m.role];
@@ -445,7 +507,10 @@ function renderHud(s) {
 
   let status;
   let held = false;
-  if (s.ride) {
+  if (s.player.state === "caught") {
+    held = true;
+    status = "🚨 You were caught. Watching your team…";
+  } else if (s.ride) {
     const r = s.ride;
     const ticket = hunter ? "" :
       r.fined ? " · 🚨 fined" : r.ticket ? " · 🎫 valid" : " · 🙈 no ticket";
@@ -508,30 +573,38 @@ function burst(kind) {
 
 function showResult(s, m) {
   shownRound = m.round;
-  const score = `You ${m.score.you} : ${m.score.bots} Bots`;
+  const score = `You ${m.score.you} : ${m.score.them} ${m.names.them}`;
   const roundWon = s.won;
-  let text = s.message ||
-    (s.role === "dodger"
-      ? `You gave the Bounty Hunters the slip with ${s.wallet.money} Ft left in your pocket.`
-      : "The Dodger got away.");
+  const last = m.history[m.history.length - 1];
+  const points = last ? ` This round: ${last.you}–${last.them}.` : "";
+  let text = (s.message ||
+    (s.runners.total > 1
+      ? `${s.runners.total - s.runners.caught} of ${s.runners.total} Dodgers got away.`
+      : s.role === "dodger"
+        ? `You gave the Bounty Hunters the slip with ${s.stats.money} Ft left in your pocket.`
+        : "The Dodger got away.")) + points;
+  const host = s.room ? s.room.host : true;
   if (m.winner) {
     const won = m.winner === "you";
     $("result-emoji").textContent = won ? "🏆" : "💀";
     $("result-title").textContent = won ? "Match won!" : "Match lost!";
     $("result-text").textContent = `${text} Final score: ${score}.`;
-    $("again").textContent = "New match (R)";
+    $("again").textContent = host ? "Back to the lobby (R)" : "Waiting for the host…";
+    $("again").disabled = !host;
     $("again").dataset.action = "restart";
     $("to-menu").hidden = false;
   } else {
-    $("result-emoji").textContent = roundWon ? "🎉" : "🚨";
-    $("result-title").textContent = roundWon ? "Round won!" : "Round lost!";
+    $("result-emoji").textContent = roundWon ? "🎉" : roundWon === null ? "🤝" : "🚨";
+    $("result-title").textContent =
+      roundWon ? "Round won!" : roundWon === null ? "Round drawn" : "Round lost!";
     if (m.next_role && m.next_role !== s.role) {
       const why = m.round === m.regulation / 2 ? "Halftime! "
         : m.round === m.regulation ? "Overtime: win by two! " : "";
       text += ` ${why}You switch sides: next round you are the ${ROLE_LABEL[m.next_role]}.`;
     }
     $("result-text").textContent = `${text} ${score}.`;
-    $("again").textContent = "Next round (Enter)";
+    $("again").textContent = host ? "Next round now (Enter)" : "Next round soon…";
+    $("again").disabled = !host;
     $("again").dataset.action = "next";
     $("to-menu").hidden = true;
   }
@@ -540,7 +613,8 @@ function showResult(s, m) {
       `${s.stats.fines} fines · walked ${s.stats.walked_m} m`
     : `${s.clock} · ${s.stats.rides} rides · walked ${s.stats.walked_m} m`;
   $("history").innerHTML = m.history
-    .map((r) => `<span class="dot ${r.won ? "won" : "lost"}" title="${ROLE_LABEL[r.role]}">` +
+    .map((r) => `<span class="dot ${r.won ? "won" : r.you === r.them ? "" : "lost"}" ` +
+      `title="${ROLE_LABEL[r.role]} · ${r.you}–${r.them}">` +
       `${r.role === "dodger" ? "🏃" : "🤠"}</span>`)
     .join("");
   $("overlay").hidden = false;
@@ -562,6 +636,8 @@ function sendKeys() { send({ type: "keys", ...keys }); }
 
 window.addEventListener("keydown", (ev) => {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (ev.target instanceof HTMLInputElement) return; // typing a name or a code
+  if (!$("menu").hidden || !$("lobby").hidden) return;
   const dir = KEYMAP[ev.code];
   if (dir) {
     ev.preventDefault();
@@ -569,7 +645,6 @@ window.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.repeat) return;
-  if (!$("menu").hidden) return;
   if (ev.code === "Escape") {
     if (match && match.winner) quitToMenu();
     else if (confirm("Leave the match and go back to the main menu?")) quitToMenu();
@@ -610,9 +685,21 @@ $("again").addEventListener("click", () => {
 $("follow").addEventListener("click", () => setFollow(true));
 $("to-menu").addEventListener("click", quitToMenu);
 $("ride-toggle").addEventListener("click", () => send({ type: "use" }));
-for (const button of document.querySelectorAll("#menu [data-role]")) {
-  button.addEventListener("click", () => startMatch(button.dataset.role));
+try { $("player-name").value = localStorage.getItem("fare-dodger-name") || ""; } catch { /* */ }
+$("play-solo").addEventListener("click", () => openGame({ type: "solo", name: playerName() }));
+for (const button of document.querySelectorAll("#menu [data-size]")) {
+  button.addEventListener("click", () =>
+    openGame({ type: "create", size: Number(button.dataset.size), name: playerName() }));
 }
+$("join").addEventListener("click", () => {
+  const code = $("join-code").value.trim().toUpperCase();
+  if (code.length !== 4) { menuError("Type the 4-letter code of the game."); return; }
+  openGame({ type: "join", code, name: playerName() });
+});
+$("join-code").addEventListener("keydown", (ev) => { if (ev.key === "Enter") $("join").click(); });
+$("switch-team").addEventListener("click", () => send({ type: "team" }));
+$("start-game").addEventListener("click", () => send({ type: "start" }));
+$("leave-lobby").addEventListener("click", quitToMenu);
 
 // --- round timer and countdown ------------------------------------------------------------
 
@@ -621,8 +708,10 @@ function renderTimer(s, m) {
   const real = s.remaining_s / world.time_scale;
   $("round-timer").textContent = mmss(real);
   $("round-timer").parentElement.classList.toggle("low", real <= 30 && s.status === "running");
+  const free = s.runners.total > 1
+    ? ` · ${s.runners.total - s.runners.caught}/${s.runners.total} free` : "";
   $("round-label").textContent =
-    m.overtime ? `Overtime ${m.round}` : `Round ${m.round}/${m.regulation}`;
+    (m.overtime ? `Overtime ${m.round}` : `Round ${m.round}/${m.regulation}`) + free;
 }
 
 function renderCountdown(s, m) {
@@ -770,11 +859,11 @@ function drawMinimap(s) {
   const c = mini.ctx;
   c.drawImage(mini.base, 0, 0);
   if (s.role === "hunter") {
-    if (s.ping) {
-      // Where the Dodger was last reported: a circle that fades and grows with its age.
-      const [x, y] = mini.project(s.ping.pos);
-      const fresh = Math.max(0, 1 - s.ping.age_s / world.ping_every_s);
-      const r = Math.max(6 * mini.dpr, (60 + s.ping.age_s * 1.4) * mini.perMetre);
+    for (const ping of s.pings || []) {
+      // Where each Dodger was last reported: a circle that fades and grows with its age.
+      const [x, y] = mini.project(ping.pos);
+      const fresh = Math.max(0, 1 - ping.age_s / world.ping_every_s);
+      const r = Math.max(6 * mini.dpr, (60 + ping.age_s * 1.4) * mini.perMetre);
       c.beginPath();
       c.arc(x, y, r, 0, 2 * Math.PI);
       c.fillStyle = `rgba(224, 49, 49, ${0.12 + 0.2 * fresh})`;
@@ -789,10 +878,11 @@ function drawMinimap(s) {
       c.fillText("?", x, y);
     }
     for (const h of s.hunters) miniDot(c, h.pos, "#ffa8a8", 4);
-    if (s.dodger) miniDot(c, s.dodger.pos, "#ffd43b", 5);
+    for (const d of s.dodgers) if (!d.caught) miniDot(c, d.pos, "#ffd43b", 5);
     miniDot(c, s.player.pos, "#fa5252", 5.5, "#fff");
   } else {
-    // The Dodger's map shows where you are, never the Bounty Hunters.
+    // The Dodgers' map shows their own team, never the Bounty Hunters.
+    for (const d of s.dodgers) miniDot(c, d.pos, d.caught ? "#adb5bd" : "#8ce99a", 4);
     miniDot(c, s.player.pos, "#40c057", 5.5, "#fff");
   }
 }

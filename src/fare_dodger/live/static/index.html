@@ -44,7 +44,7 @@
   <div id="topbar" class="panel" hidden>
     <span class="team you">You <b id="score-you">0</b></span>
     <span class="timer"><b id="round-timer">0:00</b><small id="round-label"></small></span>
-    <span class="team bots"><b id="score-bots">0</b> Bots</span>
+    <span class="team bots"><b id="score-bots">0</b> <span id="them-name">Bots</span></span>
   </div>
 
   <canvas id="minimap" class="panel" width="220" height="220" hidden></canvas>
@@ -85,20 +85,57 @@
     </div>
   </div>
 
+  <div id="lobby" hidden>
+    <div class="panel card lobby-card">
+      <div class="lobby-code-label">Game code</div>
+      <div id="lobby-code" class="lobby-code"></div>
+      <div class="muted">Share it with your friends · <span id="lobby-size"></span></div>
+      <div class="lobby-teams">
+        <div class="lobby-team" id="lobby-team-0"></div>
+        <div class="lobby-team" id="lobby-team-1"></div>
+      </div>
+      <p class="muted lobby-note">Empty places are bots. The hunting side gets two extra bots
+        every round, and a random team runs first.</p>
+      <div class="lobby-buttons">
+        <button type="button" id="switch-team" class="secondary">Switch team</button>
+        <button type="button" id="start-game">Start the match</button>
+        <button type="button" id="leave-lobby" class="secondary">Leave</button>
+      </div>
+      <p id="lobby-wait" class="muted" hidden>Waiting for the host to start…</p>
+    </div>
+  </div>
+
   <div id="menu">
     <div class="panel card menu-card">
       <div class="menu-logo">Bliccelő</div>
       <div class="menu-sub">Fare Dodger · real Budapest timetables</div>
+      <label class="field">Your name
+        <input id="player-name" maxlength="16" placeholder="Player" autocomplete="nickname">
+      </label>
       <div class="menu-buttons">
-        <button type="button" data-role="dodger">🏃 Play · start as the Dodger</button>
-        <button type="button" data-role="hunter" class="hunter">🤠 Play · start as a Bounty Hunter</button>
+        <button type="button" id="play-solo">🎮 Play solo against bots</button>
+        <div class="menu-row">
+          <span>Create a game</span>
+          <button type="button" class="size" data-size="1">1v1</button>
+          <button type="button" class="size" data-size="2">2v2</button>
+          <button type="button" class="size" data-size="3">3v3</button>
+        </div>
+        <div class="menu-row">
+          <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off"
+                 spellcheck="false">
+          <button type="button" id="join" class="hunter">Join game</button>
+        </div>
       </div>
+      <p id="menu-error" class="danger" hidden></p>
       <details class="how">
         <summary>How to play</summary>
         <ul>
-          <li>A match is played in rounds of about 4 minutes, each on a different district. First
-            to 6 rounds wins; you switch sides at halftime, and at 5–5 every round until one team
-            leads by two.</li>
+          <li>Two teams play rounds of about 4 minutes, each on a different district: one team
+            runs, the other hunts (with two extra bots), and a random team runs first. Empty
+            places are played by bots.</li>
+          <li>Every Dodger is a point: escaping scores for the runners, getting caught for the
+            hunters (a 2v2 round can end 1–1). First past half the points wins; sides switch at
+            halftime, and after a tie every round until one team leads by two.</li>
           <li><b>Dodger:</b> survive the round. Jog the streets (freely across parks), ride real
             trams, buses and metros, and stay out of the Bounty Hunters' reach. Buy a ticket
             (<b>T</b>) or risk the inspectors; grab a coffee (<b>C</b>) at a ☕ to run fast.</li>
