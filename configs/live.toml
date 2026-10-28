@@ -44,11 +44,11 @@ fine_alerts_hunters = true   # the inspectors report you to the Bounty Hunters
 # halftime; at 5-5, sides switch every round until one team leads by two.
 regulation_rounds = 10
 start_role = "dodger"
-# OpenStreetMap's tile servers are fine for local play; use another tile provider for any
-# public deployment (https://operations.osmfoundation.org/policies/tiles/). The client tints
-# the tiles for the cartoon look.
-tile_url = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-tile_attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+# OpenFreeMap's vector tiles (OpenMapTiles schema, free, no key). The client draws them in its
+# own cartoon style, flat when zoomed out, and grows 3D houses from the building footprints
+# when zoomed in. Any OpenMapTiles-schema TileJSON works here.
+tile_url = "https://tiles.openfreemap.org/planet"
+glyphs_url = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf"
 
 # Districts, one per round in a shuffled order. Each stays on one bank of the Danube, with a
 # margin from the river, because walking is free inside the polygon.

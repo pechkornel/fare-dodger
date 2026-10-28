@@ -1,5 +1,7 @@
-// Fare Dodger live client: draws server snapshots on a Leaflet map and sends input.
-"use strict";
+// Fare Dodger live client: draws server snapshots on a MapLibre map and sends input. Zoomed
+// out the map is flat with DOM markers; zoomed in it tilts into the 3D toy town (world3d.js).
+import { toonStyle } from "./toon-style.js";
+import { MAX_PITCH, SWITCH_ZOOM, ToyTown, pitchForZoom } from "./world3d.js";
 
 const KEYMAP = {
   KeyW: "up", ArrowUp: "up", KeyS: "down", ArrowDown: "down",
@@ -8,6 +10,9 @@ const KEYMAP = {
 const MODE_COLORS = { metro: "#7950f2", tram: "#fcc419", trolleybus: "#fd7e14", bus: "#339af0" };
 const MODE_ICONS = { metro: "🚇", tram: "🚋", trolleybus: "🚎", bus: "🚌" };
 const INK = "#2b2118";
+const MIN_ZOOM = 12.5;
+const MAX_ZOOM = 19;
+const START_ZOOM = 17.2;
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -18,92 +23,180 @@ const mmss = (s) => {
 const pill = (mode, route) =>
   `<span class="pill ${mode}">${MODE_ICONS[mode] || ""}${esc(route)}</span>`;
 const ROLE_LABEL = { dodger: "🏃 Dodger", hunter: "🤠 Bounty Hunter" };
+const lngLat = ([lat, lon]) => [lon, lat];
 
 let world = null;        // static data of the district being played
 let district = -1;       // its index, or -1 before the first one is loaded
 let loading = false;
 let map = null;
-let staticLayer = null;
+let town = null;         // the 3D layer
 let ws = null;
 let follow = true;
+let dragging = false;
 let shownRound = null;   // round whose result overlay is showing
 let burstTimer = null;
 let match = null;
 const keys = { up: false, down: false, left: false, right: false };
 const last = { money: null, tickets: null };
+// Camera: zoom eases towards cam.zoom, the tilt follows the zoom, and the centre follows you.
+const cam = { zoom: START_ZOOM, target: null };
 
-const markers = {
-  vehicles: new Map(), hunters: [], sight: [], player: null, dodger: null, ping: null,
-};
+const markers = { vehicles: new Map(), hunters: [], player: null, dodger: null };
 
 function init() {
-  map = L.map("map", { keyboard: false, zoomControl: true, preferCanvas: true })
-    .setView([47.4979, 19.0402], 14);
-  staticLayer = L.layerGroup().addTo(map);
-  map.on("dragstart", () => setFollow(false));
   connect();
+  requestAnimationFrame(frame);
+}
+
+function createMap(w) {
+  map = new maplibregl.Map({
+    container: "map",
+    style: toonStyle(w.tiles.url, w.tiles.glyphs),
+    center: lngLat(w.center), zoom: cam.zoom, pitch: pitchForZoom(cam.zoom),
+    minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxPitch: MAX_PITCH,
+    attributionControl: { compact: true },
+    dragRotate: false, pitchWithRotate: false, touchPitch: false, keyboard: false,
+    scrollZoom: false, doubleClickZoom: false, boxZoom: false,
+  });
+  map.touchZoomRotate.disableRotation();
+  map.on("dragstart", () => { dragging = true; setFollow(false); });
+  map.on("dragend", () => { dragging = false; });
+  map.on("zoom", (ev) => { if (ev.originalEvent) cam.zoom = map.getZoom(); }); // pinch
+  map.getCanvasContainer().addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    zoomBy(-ev.deltaY * (ev.deltaMode ? 0.05 : 0.0025));
+  }, { passive: false });
+  return new Promise((resolve) => map.on("load", () => {
+    addOverlays();
+    town = new ToyTown(map);
+    map.addLayer(town);
+    resolve();
+  }));
+}
+
+function zoomBy(delta) {
+  cam.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, cam.zoom + delta));
+}
+
+function frame() {
+  requestAnimationFrame(frame);
+  if (!map || dragging) return;
+  const z = map.getZoom();
+  const zoom = Math.abs(cam.zoom - z) < 0.002 ? cam.zoom : z + (cam.zoom - z) * 0.18;
+  const view = {};
+  if (zoom !== z) view.zoom = zoom;
+  const pitch = pitchForZoom(zoom);
+  if (Math.abs(pitch - map.getPitch()) > 0.01) view.pitch = pitch;
+  if (follow && cam.target) {
+    const c = map.getCenter();
+    const [lon, lat] = lngLat(cam.target);
+    if (Math.abs(lon - c.lng) + Math.abs(lat - c.lat) > 1e-7) {
+      view.center = [c.lng + (lon - c.lng) * 0.2, c.lat + (lat - c.lat) * 0.2];
+    }
+  }
+  if (Object.keys(view).length) map.jumpTo(view);
+  $("map").classList.toggle("toy", zoom >= SWITCH_ZOOM);
 }
 
 async function loadDistrict(index) {
   loading = true;
   try {
     const next = await (await fetch(`api/world/${index}`)).json();
-    if (!world) {
-      L.tileLayer(next.tiles.url, { maxZoom: 19, attribution: next.tiles.attribution })
-        .addTo(map);
-    }
+    if (!map) await createMap(next);
     world = next;
     district = index;
     clearDynamic();
-    staticLayer.clearLayers();
-    drawArea(world.area);
-    for (const line of world.lines) {
-      L.polyline(line.path, {
-        color: INK, weight: 8, opacity: 0.18, lineCap: "round", lineJoin: "round",
-        interactive: false,
-      }).addTo(staticLayer);
-      L.polyline(line.path, {
-        color: MODE_COLORS[line.mode] || "#888", weight: 5, opacity: 0.7, lineCap: "round",
-        lineJoin: "round", interactive: false,
-      }).addTo(staticLayer);
-    }
-    for (const st of world.stations) {
-      L.circleMarker(st.pos, {
-        radius: 5, color: INK, weight: 3, fillColor: "#fff", fillOpacity: 1,
-      }).bindTooltip(esc(st.name), { direction: "top", offset: [0, -6] }).addTo(staticLayer);
-    }
-    map.setView(world.center, 16, { animate: false });
+    drawStatic(world);
+    town.setDistrict(world);
+    cam.target = null;
+    map.jumpTo({ center: lngLat(world.center) });
     setFollow(true);
   } finally {
     loading = false;
   }
 }
 
-function drawArea(area) {
-  const style = { color: INK, weight: 3, dashArray: "10 8", fill: false, interactive: false };
-  if (area.kind === "polygon") {
-    // Dim everything outside the play area: a world-sized ring with the area as a hole.
-    const outside = [[-89, -179], [-89, 179], [89, 179], [89, -179]];
-    L.polygon([outside, area.vertices], {
-      stroke: false, fillColor: INK, fillOpacity: 0.3, interactive: false,
-    }).addTo(staticLayer);
-    L.polygon(area.vertices, style).addTo(staticLayer);
-  } else if (area.kind === "circle") {
-    L.circle([area.center_lat, area.center_lon], { ...style, radius: area.radius_m })
-      .addTo(staticLayer);
-  } else if (area.kind === "bbox") {
-    L.rectangle([[area.min_lat, area.min_lon], [area.max_lat, area.max_lon]], style)
-      .addTo(staticLayer);
+// --- ground overlays (GeoJSON layers under the labels and the 3D town) --------------------
+
+const fc = (features) => ({ type: "FeatureCollection", features });
+const feature = (geometry, properties = {}) => ({ type: "Feature", geometry, properties });
+
+function addOverlays() {
+  for (const id of ["area", "lines", "stations", "dynamic"]) {
+    map.addSource(id, { type: "geojson", data: fc([]) });
   }
+  const add = (layer) => map.addLayer(layer, "street-names");
+  add({ id: "area-dim", type: "fill", source: "area", filter: ["==", ["get", "kind"], "dim"],
+    paint: { "fill-color": INK, "fill-opacity": 0.3 } });
+  add({ id: "area-edge", type: "line", source: "area", filter: ["==", ["get", "kind"], "edge"],
+    paint: { "line-color": INK, "line-width": 3, "line-dasharray": [3, 2.5] } });
+  add({ id: "lines-casing", type: "line", source: "lines",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": INK, "line-width": 8, "line-opacity": 0.18 } });
+  add({ id: "lines", type: "line", source: "lines",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": ["get", "color"], "line-width": 5, "line-opacity": 0.75 } });
+  add({ id: "sight", type: "fill", source: "dynamic", filter: ["==", ["get", "kind"], "sight"],
+    paint: { "fill-color": "#fa5252", "fill-opacity": 0.1 } });
+  add({ id: "sight-edge", type: "line", source: "dynamic",
+    filter: ["==", ["get", "kind"], "sight"],
+    paint: { "line-color": "#fa5252", "line-width": 2, "line-opacity": 0.6,
+      "line-dasharray": [3, 3] } });
+  add({ id: "ping", type: "fill", source: "dynamic", filter: ["==", ["get", "kind"], "ping"],
+    paint: { "fill-color": "#e03131", "fill-opacity": ["*", 0.15, ["get", "fade"]] } });
+  add({ id: "ping-edge", type: "line", source: "dynamic", filter: ["==", ["get", "kind"], "ping"],
+    paint: { "line-color": "#e03131", "line-width": 3, "line-opacity": ["get", "fade"],
+      "line-dasharray": [1.5, 2] } });
+  add({ id: "stations", type: "circle", source: "stations",
+    paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": INK,
+      "circle-stroke-width": 3 } });
+  map.addLayer({ id: "station-names", type: "symbol", source: "stations", minzoom: 16,
+    layout: { "text-field": ["get", "name"], "text-font": ["Noto Sans Bold"], "text-size": 13,
+      "text-offset": [0, 1.2], "text-anchor": "top", "text-optional": true },
+    paint: { "text-color": INK, "text-halo-color": "#fff", "text-halo-width": 2.5 } });
+}
+
+function drawStatic(w) {
+  const area = w.area;
+  let ring;
+  if (area.kind === "polygon") ring = area.vertices.map(lngLat);
+  else if (area.kind === "circle") ring = circle([area.center_lat, area.center_lon], area.radius_m);
+  else {
+    ring = [[area.min_lon, area.min_lat], [area.max_lon, area.min_lat],
+      [area.max_lon, area.max_lat], [area.min_lon, area.max_lat]];
+  }
+  ring = [...ring, ring[0]];
+  // Dim everything outside the play area: a world-sized ring with the area as a hole.
+  const outside = [[-179, -85], [179, -85], [179, 85], [-179, 85], [-179, -85]];
+  map.getSource("area").setData(fc([
+    feature({ type: "Polygon", coordinates: [outside, ring] }, { kind: "dim" }),
+    feature({ type: "LineString", coordinates: ring }, { kind: "edge" }),
+  ]));
+  map.getSource("lines").setData(fc(w.lines.map((line) => feature(
+    { type: "LineString", coordinates: line.path.map(lngLat) },
+    { color: MODE_COLORS[line.mode] || "#888" }))));
+  map.getSource("stations").setData(fc(w.stations.map((st) => feature(
+    { type: "Point", coordinates: lngLat(st.pos) }, { name: st.name }))));
+}
+
+/** Ring of [lon, lat] approximating a circle of ``radius`` metres. */
+function circle([lat, lon], radius) {
+  const dLat = radius / 111320;
+  const dLon = dLat / Math.cos((lat * Math.PI) / 180);
+  const ring = [];
+  for (let i = 0; i <= 48; i++) {
+    const a = (i / 48) * 2 * Math.PI;
+    ring.push([lon + dLon * Math.cos(a), lat + dLat * Math.sin(a)]);
+  }
+  return ring;
 }
 
 function clearDynamic() {
   for (const m of markers.vehicles.values()) m.remove();
   markers.vehicles.clear();
-  for (const m of [...markers.hunters, ...markers.sight]) m.remove();
+  for (const m of markers.hunters) m.remove();
   markers.hunters = [];
-  markers.sight = [];
-  for (const key of ["player", "dodger", "ping"]) {
+  for (const key of ["player", "dodger"]) {
     if (markers[key]) { markers[key].remove(); markers[key] = null; }
   }
   last.money = last.tickets = null;
@@ -127,11 +220,13 @@ function setFollow(on) {
 
 // --- rendering --------------------------------------------------------------------------
 
-function divMarker(pos, html, className, size) {
-  return L.marker(pos, {
-    icon: L.divIcon({ html, className, iconSize: size, iconAnchor: [size[0] / 2, size[1] / 2] }),
-    interactive: false, keyboard: false,
-  }).addTo(map);
+// Flat-view marker; hidden by CSS once the map is zoomed into the toy town.
+function divMarker(pos, html, z) {
+  const el = document.createElement("div");
+  el.className = "entity";
+  el.innerHTML = html;
+  el.style.zIndex = z;
+  return new maplibregl.Marker({ element: el }).setLngLat(lngLat(pos)).addTo(map);
 }
 
 function render(s) {
@@ -147,11 +242,12 @@ function render(s) {
   renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
   renderHunters(s.hunters, s.role);
   renderDodger(s.dodger);
-  renderPing(s.ping);
+  renderGround(s);
   renderPlayer(s.player, s.role);
+  town.update(s);
   renderScore(match);
   renderHud(s);
-  if (follow) map.setView(s.player.pos, map.getZoom(), { animate: false });
+  cam.target = s.player.pos;
   if (match.round_over && shownRound !== match.round) showResult(s, match);
   if (!match.round_over) { $("overlay").hidden = true; shownRound = null; }
 }
@@ -162,14 +258,14 @@ function renderVehicles(list, myTrip) {
     seen.add(trip);
     let m = markers.vehicles.get(trip);
     if (!m) {
-      m = divMarker([lat, lon], pill(mode, route), "vehicle", [60, 22]);
+      m = divMarker([lat, lon], `<div class="vehicle">${pill(mode, route)}</div>`, 1);
       markers.vehicles.set(trip, m);
     } else {
-      m.setLatLng([lat, lon]);
+      m.setLngLat([lon, lat]);
     }
     const el = m.getElement();
-    if (el) el.classList.toggle("mine", trip === myTrip);
-    m.setZIndexOffset(trip === myTrip ? 900 : 0);
+    el.firstChild.classList.toggle("mine", trip === myTrip);
+    el.style.zIndex = trip === myTrip ? 900 : 1;
   }
   for (const [trip, m] of markers.vehicles) {
     if (!seen.has(trip)) { m.remove(); markers.vehicles.delete(trip); }
@@ -183,19 +279,10 @@ function renderHunters(list, role) {
     const cls = `toon hunter${team}${hunter.riding ? " riding" : ""}` +
       `${hunter.chasing ? " chasing" : ""}`;
     if (!markers.hunters[i]) {
-      markers.hunters[i] = divMarker(hunter.pos, `<div class="${cls}">🤠</div>`, "", [34, 34]);
-      markers.hunters[i].setZIndexOffset(800);
-      markers.sight[i] = L.circle(hunter.pos, {
-        radius: world.sight_radius_m, color: "#fa5252", weight: 2, dashArray: "6 6",
-        opacity: 0.6, fillOpacity: 0.08, interactive: false,
-      }).addTo(map);
+      markers.hunters[i] = divMarker(hunter.pos, `<div class="${cls}">🤠</div>`, 800);
     }
-    markers.hunters[i].setLatLng(hunter.pos);
+    markers.hunters[i].setLngLat(lngLat(hunter.pos));
     markers.hunters[i].getElement().firstChild.className = cls;
-    markers.sight[i].setLatLng(hunter.pos);
-    markers.sight[i].setStyle({
-      opacity: hunter.riding ? 0 : 0.6, fillOpacity: hunter.riding ? 0 : 0.08,
-    });
   });
 }
 
@@ -206,24 +293,22 @@ function renderDodger(dodger) {
   }
   const cls = `toon wanted${dodger.held ? " held" : ""}`;
   if (!markers.dodger) {
-    markers.dodger = divMarker(dodger.pos, `<div class="${cls}">🏃</div>`, "", [34, 34]);
-    markers.dodger.setZIndexOffset(950);
+    markers.dodger = divMarker(dodger.pos, `<div class="${cls}">🏃</div>`, 950);
   }
-  markers.dodger.setLatLng(dodger.pos);
+  markers.dodger.setLngLat(lngLat(dodger.pos));
   markers.dodger.getElement().firstChild.className = cls;
 }
 
-function renderPing(ping) {
-  if (!ping) { if (markers.ping) { markers.ping.remove(); markers.ping = null; } return; }
-  if (!markers.ping) {
-    markers.ping = L.circle(ping.pos, {
-      radius: 60, color: "#e03131", weight: 3, dashArray: "4 6", fillOpacity: 0.15,
-      interactive: false,
-    }).addTo(map);
+// Sight circles of the Bounty Hunters on foot and the last radar ping, drawn on the ground.
+function renderGround(s) {
+  const features = s.hunters.filter((h) => !h.riding).map((h) => feature(
+    { type: "Polygon", coordinates: [circle(h.pos, world.sight_radius_m)] }, { kind: "sight" }));
+  if (s.ping) {
+    const fade = Math.max(0.15, 1 - s.ping.age_s / world.ping_every_s);
+    features.push(feature({ type: "Polygon", coordinates: [circle(s.ping.pos, 60)] },
+      { kind: "ping", fade }));
   }
-  const fade = Math.max(0.15, 1 - ping.age_s / world.ping_every_s);
-  markers.ping.setLatLng(ping.pos);
-  markers.ping.setStyle({ opacity: fade, fillOpacity: 0.15 * fade });
+  map.getSource("dynamic").setData(fc(features));
 }
 
 function renderPlayer(p, role) {
@@ -233,10 +318,9 @@ function renderPlayer(p, role) {
   if (role === "hunter") face = "🤠";
   const cls = `toon player ${role} ${state}`;
   if (!markers.player) {
-    markers.player = divMarker(p.pos, `<div class="${cls}">${face}</div>`, "", [34, 34]);
-    markers.player.setZIndexOffset(1000);
+    markers.player = divMarker(p.pos, `<div class="${cls}">${face}</div>`, 1000);
   }
-  markers.player.setLatLng(p.pos);
+  markers.player.setLngLat(lngLat(p.pos));
   const el = markers.player.getElement().firstChild;
   el.className = cls;
   if (el.textContent !== face) el.textContent = face;
@@ -411,6 +495,8 @@ window.addEventListener("keydown", (ev) => {
   else if (/^Digit[1-6]$/.test(ev.code)) send({ type: "wait", index: Number(ev.code.slice(5)) - 1 });
   else if (ev.code === "KeyT") send({ type: "ticket" });
   else if (ev.code === "KeyF") setFollow(true);
+  else if (ev.code === "Equal" || ev.code === "NumpadAdd") zoomBy(0.75);
+  else if (ev.code === "Minus" || ev.code === "NumpadSubtract") zoomBy(-0.75);
   else if (ev.code === "KeyR") restart();
 });
 

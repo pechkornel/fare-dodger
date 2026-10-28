@@ -195,6 +195,8 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
 - ✅ Matches: first to 6 rounds, sides switch at halftime and every overtime round (win by
   two), a playable Bounty Hunter side with a bot Dodger, and six districts in rotation
   (`feat/live-match`, ADR 0006).
+- ✅ Toy-town graphics: flat cartoon vector map zoomed out, a tilted 3D rounded-cube town
+  zoomed in (`feat/toon-3d`, ADR 0007).
 - Next: playtest and tune the bot Dodger, prices and radii per side, and polish the graphics
   (the owner wants more). Then street walking. Multiplayer is further away.
 
