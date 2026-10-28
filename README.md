@@ -74,12 +74,14 @@ On the default network (feed 2821.20261028, pinned service day 2026-11-17): 421 
 | | |
 |---|---|
 | Network build from the extracted feed | ~0.5 s |
-| 10-min reachability query (RAPTOR), median / p95 | **0.35 ms / 0.84 ms** |
-| 45-min query covering the whole network | ~3.6 ms |
+| 10-min reachability query (RAPTOR), median / p95 | **0.30 ms / 0.76 ms** |
+| 45-min query covering the whole network, median | ~3.6 ms |
 | Full 12-round bot game | 0.03–0.6 s |
 
-Simulation results and rule-change suggestions will be written up in `docs/results.md`
-(see the remaining steps in [`docs/plan.md`](docs/plan.md)).
+Simulation results and rule-change suggestions are in [`docs/results.md`](docs/results.md).
+In short: under the v0 rules the greedy Dodger beats the best Inspector bots 76% of the
+time. Revealing the Dodger's modes every round and its position every 2nd round brings
+that to 46.5%, close to the 45% balance target.
 
 ## Development
 
