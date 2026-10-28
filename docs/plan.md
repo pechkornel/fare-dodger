@@ -197,6 +197,8 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
   (`feat/live-match`, ADR 0006).
 - ✅ Walking along OpenStreetMap streets, a slower clock (6×) with faster jogging (10 km/h), and
   catches only on the same vehicle or with both on foot (`feat/live-streets`, ADR 0007).
+- ✅ Smooth route lines: vehicles stop at their platforms on the shape, no spikes into station
+  centres, cleaned-up shapes (`feat/live-smooth-lines`, ADR 0005 addendum).
 - Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and polish
   the graphics (the owner wants more). Multiplayer is further away.
 

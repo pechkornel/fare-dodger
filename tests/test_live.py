@@ -11,7 +11,14 @@ from fare_dodger.live.bots import Agent, journey_state
 from fare_dodger.live.game import Keys, LiveGame, Role, Status, world_view
 from fare_dodger.live.match import District, Match, match_winner, role_for
 from fare_dodger.live.server import create_app
-from fare_dodger.live.shapes import HOPS_FILE, Hops, build_hops, cut_shape, load_or_build_hops
+from fare_dodger.live.shapes import (
+    HOPS_FILE,
+    Hops,
+    build_hops,
+    cut_shape,
+    load_or_build_hops,
+    smooth_path,
+)
 from fare_dodger.live.world import World, distance
 from fare_dodger.network.timetable import Timetable
 from fare_dodger.routing.raptor import raptor
@@ -225,31 +232,46 @@ def test_hops_follow_the_shape_only_where_there_is_one(timetable: Timetable, hop
 def test_vehicle_follows_the_shape(shaped_world: World) -> None:
     world = shaped_world
     trip = m1_east_at_eight(world)
+    pattern = world.trip_pattern[trip]
     west, central = world.node_xy[node(world, "West")], world.node_xy[node(world, "Central")]
+    # Vehicles stand where the shape passes the platform, not at the merged station centre.
+    platform = world.proj.to_xy(47.5000, 19.0340)  # WST_1
     start = world.trip_state(trip, EIGHT)
-    assert start is not None and start.pos == west
+    assert start is not None and start.pos == world.stop_point(pattern, 0)
+    assert distance(start.pos, platform) < 1e-6 and 0 < distance(start.pos, west) < 15
     bend = world.proj.to_xy(*BEND)
     # Halfway in time is halfway along the bent path: near the bend, far north of the track.
     half = world.trip_state(trip, EIGHT + 60)
     assert half is not None and distance(half.pos, bend) < 30
     assert half.pos[1] - west[1] > 250
     arrive = world.trip_state(trip, EIGHT + 120)
-    assert arrive is not None and arrive.pos == central
-    previous = west
-    for s in range(1, 121):
+    assert arrive is not None and arrive.pos == world.stop_point(pattern, 1)
+    assert distance(arrive.pos, central) < 30
+    assert world.stop_distance(arrive.pos, node(world, "Central")) == 0
+    previous = start.pos
+    for s in range(1, 241):
         state = world.trip_state(trip, EIGHT + s)
         assert state is not None
-        assert distance(previous, state.pos) < 15  # ~1.4 km in 120 s: no jumps
+        assert distance(previous, state.pos) < 15  # ~1.4 km in 120 s: no jumps, even at stops
         previous = state.pos
+
+
+def test_pattern_paths_are_continuous_through_stops(shaped_world: World) -> None:
+    world = shaped_world
+    for p in range(world.tt.n_patterns):
+        hops = world._paths[p]
+        for (before, _), (after, _) in itertools.pairwise(hops):
+            assert before[-1] == after[0]
 
 
 def test_world_view_draws_shaped_lines(shaped_world: World) -> None:
     lines = world_view(shaped_world, LiveConfig())["lines"]
     m1 = [line for line in lines if line["route"] == "M1"]
+    bend = shaped_world.proj.to_xy(*BEND)
     assert any(
-        any(abs(lat - BEND[0]) < 1e-6 and abs(lon - BEND[1]) < 1e-6 for lat, lon in line["path"])
+        any(distance(shaped_world.proj.to_xy(lat, lon), bend) < 10 for lat, lon in line["path"])
         for line in m1
-    )
+    )  # through the bend (its corner rounded off a little)
 
 
 def test_hops_are_cached(timetable: Timetable, mini_gtfs_dir: Path, tmp_path: Path) -> None:
@@ -420,3 +442,16 @@ def test_live_toml_districts() -> None:
     assert all(net.area.kind == "polygon" for _, net in districts)
     assert len({net.area.model_dump_json() for _, net in districts}) == len(districts)
     assert live_districts(None)[0][0] == "District"
+
+
+def test_smooth_path_drops_spikes_and_jitter_but_keeps_the_stops() -> None:
+    # A straight 300 m run with 0.5 m jitter and a 10 m out-and-back spike in the middle.
+    path = [(0.0, 0.0), (50.0, 0.4), (100.0, -0.3), (150.0, 0.0), (150.0, 10.0), (150.5, 0.2)]
+    path += [(200.0, -0.4), (300.0, 0.0)]
+    smooth = smooth_path(path)
+    assert smooth[0] == (0.0, 0.0) and smooth[-1] == (300.0, 0.0)
+    assert max(abs(y) for _, y in smooth) < 0.5
+    # A right angle gets rounded, inside the corner.
+    corner = smooth_path([(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)])
+    assert corner[0] == (0.0, 0.0) and corner[-1] == (100.0, 100.0)
+    assert (100.0, 0.0) not in corner and len(corner) > 3

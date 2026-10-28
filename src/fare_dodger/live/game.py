@@ -325,7 +325,7 @@ class LiveGame:
             elif self.t >= dep.time:
                 who.waiting_for = None
                 who.ride = Ride(dep.trip, dep.pos)
-                who.pos = world.node_xy[dep.node]
+                who.pos = world.stop_point(dep.pattern, dep.pos)
                 who.street = None
                 who.follower.reset()
                 who.rides += 1
@@ -408,7 +408,8 @@ class LiveGame:
             target = last
         if target is not None and self.t >= arr[target]:
             node = world.stops(ride.trip)[target]
-            who.pos, who.ride = world.node_xy[node], None
+            who.pos = world.stop_point(world.trip_pattern[ride.trip], target)
+            who.ride = None
             name = world.tt.node_name[node]
             if ride.fined:
                 who.held_until = self.t + self.cfg.fine_hold_s

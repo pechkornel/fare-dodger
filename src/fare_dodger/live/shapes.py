@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 from bisect import bisect_right
 from collections import defaultdict
 from pathlib import Path
@@ -147,6 +148,89 @@ def build_hops(feed_dir: Path, tt: Timetable) -> Hops:
             if _length_m([ends[0], *path, ends[1]]) <= MAX_DETOUR * straight + MAX_DETOUR_SLACK_M:
                 hops[p][i] = [(round(lat, 6), round(lon, 6)) for lat, lon in path]
     return hops
+
+
+XY = tuple[float, float]
+#: Spikes: a point where the path turns back by more than this (degrees) within ...
+SPIKE_TURN_DEG = 135.0
+#: ... this many metres (one of its two segments) is dropped.
+SPIKE_M = 25.0
+#: Points closer than this to the simplified line are dropped (metres).
+SIMPLIFY_M = 1.5
+#: Corners are rounded this often (Chaikin's corner cutting), cutting at most this far along
+#: each segment so long straights keep their corners close to the street.
+ROUNDING_PASSES = 2
+MAX_CUT_M = 8.0
+
+
+def _turn_deg(a: XY, b: XY, c: XY) -> float:
+    u = (b[0] - a[0], b[1] - a[1])
+    v = (c[0] - b[0], c[1] - b[1])
+    nu, nv = math.hypot(*u), math.hypot(*v)
+    if nu == 0 or nv == 0:
+        return 0.0
+    cos = max(-1.0, min(1.0, (u[0] * v[0] + u[1] * v[1]) / (nu * nv)))
+    return math.degrees(math.acos(cos))
+
+
+def _drop_spikes(path: list[XY]) -> list[XY]:
+    out = list(path)
+    changed = True
+    while changed and len(out) > 2:
+        changed = False
+        for i in range(1, len(out) - 1):
+            a, b, c = out[i - 1], out[i], out[i + 1]
+            short = min(math.dist(a, b), math.dist(b, c)) < SPIKE_M
+            if short and _turn_deg(a, b, c) > SPIKE_TURN_DEG:
+                del out[i]
+                changed = True
+                break
+    return out
+
+
+def _simplify(path: list[XY], tolerance: float) -> list[XY]:
+    """Douglas-Peucker: keep the ends and the points farther than ``tolerance`` from the line."""
+    if len(path) < 3:
+        return list(path)
+    (x0, y0), (x1, y1) = path[0], path[-1]
+    dx, dy = x1 - x0, y1 - y0
+    length = math.hypot(dx, dy)
+    worst, index = -1.0, 0
+    for i in range(1, len(path) - 1):
+        px, py = path[i]
+        if length == 0:
+            d = math.hypot(px - x0, py - y0)
+        else:
+            d = abs(dy * (px - x0) - dx * (py - y0)) / length
+        if d > worst:
+            worst, index = d, i
+    if worst <= tolerance:
+        return [path[0], path[-1]]
+    return _simplify(path[: index + 1], tolerance)[:-1] + _simplify(path[index:], tolerance)
+
+
+def _round_corners(path: list[XY]) -> list[XY]:
+    """One pass of Chaikin's corner cutting (at most ``MAX_CUT_M`` along each segment); the
+    two ends stay put."""
+    if len(path) < 3:
+        return list(path)
+    out = [path[0]]
+    for (ax, ay), (bx, by) in itertools.pairwise(path):
+        length = math.hypot(bx - ax, by - ay)
+        f = min(0.25, MAX_CUT_M / length) if length > 0 else 0.25
+        out.append((ax + (bx - ax) * f, ay + (by - ay) * f))
+        out.append((bx + (ax - bx) * f, by + (ay - by) * f))
+    out.append(path[-1])
+    return out
+
+
+def smooth_path(path: list[XY]) -> list[XY]:
+    """Clean up a vehicle path from GTFS shapes: drop out-and-back spikes, remove jitter and
+    round the corners. The first and last points (the stops) never move."""
+    out = _simplify(_drop_spikes(path), SIMPLIFY_M)
+    for _ in range(ROUNDING_PASSES):
+        out = _round_corners(out)
+    return out
 
 
 def load_or_build_hops(feed_dir: Path, tt: Timetable, cache_dir: Path) -> Hops:
