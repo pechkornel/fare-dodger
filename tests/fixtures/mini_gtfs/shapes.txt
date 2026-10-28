@@ -1,0 +1,5 @@
+shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence,shape_dist_traveled
+M1E,47.500000,19.034000,1,0.0
+M1E,47.503000,19.042000,2,687.3
+M1E,47.500000,19.050100,3,1381.3
+M1E,47.500000,19.066000,4,2575.7

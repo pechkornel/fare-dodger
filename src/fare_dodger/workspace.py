@@ -7,7 +7,8 @@ from pathlib import Path
 
 from fare_dodger.config import LiveConfig, NetworkConfig, RulesConfig, data_dir, load_toml
 from fare_dodger.gtfs.download import ZIP_NAME, extract_feed, read_meta
-from fare_dodger.network.build import load_or_build
+from fare_dodger.live.shapes import Hops, load_or_build_hops
+from fare_dodger.network.build import cache_key, load_or_build
 from fare_dodger.network.timetable import Timetable
 
 
@@ -40,6 +41,11 @@ class Workspace:
     def network(self, cfg: NetworkConfig, *, rebuild: bool = False) -> tuple[Timetable, Path, bool]:
         feed_dir, fingerprint = self.feed_dir()
         return load_or_build(feed_dir, cfg, self.networks_dir, fingerprint, rebuild=rebuild)
+
+    def vehicle_paths(self, cfg: NetworkConfig, tt: Timetable) -> Hops:
+        """GTFS shape paths of the hops of ``tt`` (the network built for ``cfg``), cached."""
+        feed_dir, fingerprint = self.feed_dir()
+        return load_or_build_hops(feed_dir, tt, self.networks_dir / cache_key(fingerprint, cfg))
 
 
 def network_config(path: Path | None) -> NetworkConfig:

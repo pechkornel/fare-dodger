@@ -22,11 +22,15 @@ Features exercised by the tests:
 * Bus B1 has an express trip that overtakes the regular one (forces a FIFO pattern split).
 * Night bus N9 runs after midnight (times >= 24:00:00).
 * A Saturday-only service that must be ignored on a weekday.
+* Eastbound M1 has a GTFS shape that bends north between West and Central (vehicle paths in
+  the live game); other trips have no shape.
 """
 
 from __future__ import annotations
 
 import csv
+import itertools
+import math
 from pathlib import Path
 
 OUT = Path(__file__).parent / "mini_gtfs"
@@ -67,6 +71,23 @@ ROUTES = [
 ]
 
 
+# shape_id -> points; stops on the shape are at the listed point indices.
+SHAPES = {
+    "M1E": [(47.5000, 19.0340), (47.5030, 19.0420), (47.5000, 19.0501), (47.5000, 19.0660)],
+}
+SHAPE_STOPS = {"M1E": {"WST_1": 0, "CEN_M1": 2, "EST_1": 3}}
+
+
+def shape_distances(points: list[tuple[float, float]]) -> list[float]:
+    """Cumulative metres along ``points`` (equirectangular, like ``fare_dodger.geo``)."""
+    out = [0.0]
+    for (lat0, lon0), (lat1, lon1) in itertools.pairwise(points):
+        m_lat = math.pi * 6_371_008.8 / 180.0
+        m_lon = m_lat * math.cos(math.radians((lat0 + lat1) / 2))
+        out.append(out[-1] + math.hypot((lat1 - lat0) * m_lat, (lon1 - lon0) * m_lon))
+    return out
+
+
 def hms(seconds: int) -> str:
     h, rest = divmod(seconds, 3600)
     m, s = divmod(rest, 60)
@@ -79,8 +100,8 @@ def t(hh: int, mm: int) -> int:
 
 def main() -> None:
     OUT.mkdir(exist_ok=True)
-    trips: list[tuple[str, str, str, str]] = []
-    stop_times: list[tuple[str, str, str, str, int]] = []
+    trips: list[tuple[str, str, str, str, str]] = []
+    stop_times: list[tuple[str, str, str, str, int, str]] = []
 
     def add_trip(
         route: str,
@@ -89,17 +110,22 @@ def main() -> None:
         direction: int,
         start: int,
         legs: list[tuple[str, int]],
+        shape: str = "",
     ) -> None:
         """``legs`` = [(stop_id, minutes after start), ...]; no dwell time."""
-        trips.append((route, service, trip_id, str(direction)))
+        trips.append((route, service, trip_id, str(direction), shape))
+        dists = shape_distances(SHAPES[shape]) if shape else []
         for seq, (stop, offset) in enumerate(legs, start=1):
             clock = hms(start + offset * 60)
-            stop_times.append((trip_id, clock, clock, stop, seq))
+            dist = f"{dists[SHAPE_STOPS[shape][stop]]:.1f}" if shape else ""
+            stop_times.append((trip_id, clock, clock, stop, seq, dist))
 
     # Metro M1 West <-> Central <-> East, every 4 minutes, 2 minutes per hop.
     for k in range(46):
         dep = t(7, 0) + 240 * k
-        add_trip("M1", "WK", f"M1E_{k:02d}", 0, dep, [("WST_1", 0), ("CEN_M1", 2), ("EST_1", 4)])
+        add_trip(
+            "M1", "WK", f"M1E_{k:02d}", 0, dep, [("WST_1", 0), ("CEN_M1", 2), ("EST_1", 4)], "M1E"
+        )
         add_trip("M1", "WK", f"M1W_{k:02d}", 1, dep, [("EST_2", 0), ("CEN_M2", 2), ("WST_2", 4)])
     # Saturday metro (different service): must not appear on a weekday.
     for k in range(10):
@@ -181,11 +207,29 @@ def main() -> None:
         ["agency_id", "route_id", "route_short_name", "route_type", "route_color"],
         [("FX", *r) for r in ROUTES],
     )
-    write("trips", ["route_id", "service_id", "trip_id", "direction_id"], list(trips))
+    write("trips", ["route_id", "service_id", "trip_id", "direction_id", "shape_id"], list(trips))
     write(
         "stop_times",
-        ["trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence"],
+        [
+            "trip_id",
+            "arrival_time",
+            "departure_time",
+            "stop_id",
+            "stop_sequence",
+            "shape_dist_traveled",
+        ],
         list(stop_times),
+    )
+    write(
+        "shapes",
+        ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence", "shape_dist_traveled"],
+        [
+            (shape_id, f"{lat:.6f}", f"{lon:.6f}", seq, f"{dist:.1f}")
+            for shape_id, points in SHAPES.items()
+            for seq, ((lat, lon), dist) in enumerate(
+                zip(points, shape_distances(points), strict=True), start=1
+            )
+        ],
     )
     # Wednesday 2026-11-04 and Thursday 2026-11-05 are weekdays; 2026-11-07 is a Saturday.
     write(

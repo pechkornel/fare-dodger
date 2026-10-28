@@ -300,7 +300,8 @@ def play(
     if seed is not None:
         cfg = cfg.model_copy(update={"seed": seed})
     tt = _open_network(config, data)
-    app_ = create_app(World(tt, net.area), cfg)
+    hops = Workspace.at(data).vehicle_paths(net, tt)
+    app_ = create_app(World(tt, net.area, hops), cfg)
     url = f"http://{host}:{port}/"
     typer.echo(f"Fare Dodger live: {tt.n_nodes} stations. Open {url} (Ctrl+C to stop)")
     if open_browser:

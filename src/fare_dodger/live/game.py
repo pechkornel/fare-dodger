@@ -360,15 +360,16 @@ def world_view(world: World, cfg: LiveConfig) -> dict[str, Any]:
     lines: dict[tuple[str, tuple[int, ...]], dict[str, Any]] = {}
     for p in range(tt.n_patterns):
         stops = tuple(tt.pattern_stops(p))
+        # Both directions of a line share one entry: keep the more detailed path (a direction
+        # without a GTFS shape is drawn stop to stop).
         key = (tt.pat_route_name[p], tuple(sorted(stops)))
-        lines.setdefault(
-            key,
-            {
+        path = [[round(c, 6) for c in world.proj.to_latlon(q)] for q in world.pattern_path(p)]
+        if key not in lines or len(path) > len(lines[key]["path"]):
+            lines[key] = {
                 "route": tt.pat_route_name[p],
                 "mode": tt.pattern_mode(p).value,
-                "path": [[tt.node_lat[n], tt.node_lon[n]] for n in stops],
-            },
-        )
+                "path": path,
+            }
     return {
         "center": [world.proj.lat0, world.proj.lon0],
         "area": world.area.model_dump(),

@@ -11,6 +11,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   district. Walk with WASD, wait for and ride real trips, and avoid bot Inspectors who are pinged
   your position every 3 minutes. FastAPI WebSocket server, Leaflet client on OpenStreetMap tiles,
   `configs/live.toml`; ADR 0005.
+- Live game: vehicles follow their GTFS shapes between stops instead of straight lines, and
+  the map draws route lines along the same paths (cached as `hops.json`).
 
 ## [0.1.0] - 2026-10-28
 

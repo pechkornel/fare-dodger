@@ -1,18 +1,21 @@
 """The timetable seen in continuous time: map coordinates, vehicle positions, departures.
 
 Positions are metres on a local flat projection (x east, y north) around the network's
-centre. Vehicles move in straight lines between consecutive stops at constant speed and
+centre. Vehicles move between consecutive stops at constant speed, along the hop's GTFS shape
+when one is given (see :mod:`fare_dodger.live.shapes`) and in a straight line otherwise, and
 stand at a stop from its arrival to its departure time.
 """
 
 from __future__ import annotations
 
+import itertools
 import math
 from bisect import bisect_right
 from dataclasses import dataclass
 
 from fare_dodger.config import Area
 from fare_dodger.geo import metres_per_degree
+from fare_dodger.live.shapes import Hops
 from fare_dodger.modes import Mode
 from fare_dodger.network.timetable import Timetable
 
@@ -74,7 +77,7 @@ class World:
     #: A vehicle this many seconds from a stop still counts as standing there.
     AT_STOP_GRACE_S = 5
 
-    def __init__(self, tt: Timetable, area: Area) -> None:
+    def __init__(self, tt: Timetable, area: Area, hops: Hops | None = None) -> None:
         self.tt = tt
         self.area = area
         n = tt.n_nodes
@@ -85,6 +88,18 @@ class World:
             for trip in range(tt.pat_trip_ptr[p], tt.pat_trip_ptr[p + 1]):
                 self.trip_pattern[trip] = p
         self._stops = [tt.pattern_stops(p) for p in range(tt.n_patterns)]
+        #: Per pattern, per hop: the path from one stop to the next and its cumulative lengths.
+        self._paths: list[list[tuple[list[Point], list[float]]]] = []
+        for p, stops in enumerate(self._stops):
+            pattern_paths = []
+            for i in range(len(stops) - 1):
+                inner = [self.proj.to_xy(lat, lon) for lat, lon in hops[p][i]] if hops else []
+                path = [self.node_xy[stops[i]], *inner, self.node_xy[stops[i + 1]]]
+                cum = [0.0]
+                for a, b in itertools.pairwise(path):
+                    cum.append(cum[-1] + distance(a, b))
+                pattern_paths.append((path, cum))
+            self._paths.append(pattern_paths)
         self._times = [self._trip_times(trip) for trip in range(tt.n_trips)]
         #: Stations where at least one pattern continues (trips clipped at the area edge
         #: only end at some stations).
@@ -106,6 +121,21 @@ class World:
 
     def contains(self, p: Point) -> bool:
         return self.area.contains(*self.proj.to_latlon(p))
+
+    def hop_point(self, pattern: int, hop: int, f: float) -> Point:
+        """The point a fraction ``f`` of the way along ``hop`` of ``pattern``."""
+        path, cum = self._paths[pattern][hop]
+        if len(path) == 2:
+            return lerp(path[0], path[1], f)
+        target = f * cum[-1]
+        j = min(max(bisect_right(cum, target) - 1, 0), len(path) - 2)
+        span = cum[j + 1] - cum[j]
+        return lerp(path[j], path[j + 1], (target - cum[j]) / span if span > 0 else 0.0)
+
+    def pattern_path(self, pattern: int) -> list[Point]:
+        """The whole path of ``pattern``, stop to stop."""
+        hops = self._paths[pattern]
+        return [hops[0][0][0], *(q for path, _ in hops for q in path[1:])] if hops else []
 
     def nearest_node(self, p: Point, max_dist: float = math.inf) -> int | None:
         best, best_d = None, max_dist
@@ -142,7 +172,7 @@ class World:
         if t <= dep[i] or i == len(arr) - 1:
             return TripState(trip, self.node_xy[stops[i]], i, at_stop=True)
         f = (t - dep[i]) / (arr[i + 1] - dep[i])
-        pos = lerp(self.node_xy[stops[i]], self.node_xy[stops[i + 1]], f)
+        pos = self.hop_point(self.trip_pattern[trip], i, f)
         grace = self.AT_STOP_GRACE_S
         at_stop = t - dep[i] <= grace or arr[i + 1] - t <= grace
         return TripState(trip, pos, i, at_stop)

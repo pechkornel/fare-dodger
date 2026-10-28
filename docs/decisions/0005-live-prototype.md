@@ -46,3 +46,17 @@ walking is acceptable for now; walking along streets comes later.
 - OpenStreetMap's public tiles are fine for local play, but a public deployment needs
   another tile provider (`tile_url` in `configs/live.toml`).
 - The balance numbers from the round-based simulations do not carry over directly.
+
+## Addendum (2026-10-28): GTFS shapes for vehicle paths
+Vehicles now follow their real route geometry. Each hop of a pattern (two consecutive
+stations) gets the part of its first trip's GTFS shape between the two stops, cut by
+`shape_dist_traveled` (`live/shapes.py`). The path runs from the merged station's centre to
+the platform's point on the shape, along the shape, and on to the next station's centre, at
+constant speed per hop. Hops without shape data, or whose cut is longer than 3× the straight
+distance plus 300 m, stay straight lines. The route lines on the map use the same paths.
+
+On the live district every one of the 193 hops has a shape. The longest detour is 2.4× the
+straight distance, where trolleybus 76 loops around Keleti pályaudvar. The paths are built in
+about 0.5 s on the first `play` and cached as `hops.json` next to the network. The network
+build, RAPTOR and the round-based game are unchanged. Inspectors walking between stations
+still move in straight lines.

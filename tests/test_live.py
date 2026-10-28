@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 
 from fare_dodger.config import LiveConfig, NetworkConfig
 from fare_dodger.live.bots import Agent, journey_state
-from fare_dodger.live.game import Keys, LiveGame, Status
+from fare_dodger.live.game import Keys, LiveGame, Status, world_view
 from fare_dodger.live.server import create_app
+from fare_dodger.live.shapes import HOPS_FILE, Hops, build_hops, cut_shape, load_or_build_hops
 from fare_dodger.live.world import World, distance
 from fare_dodger.network.timetable import Timetable
 from fare_dodger.routing.raptor import raptor
@@ -22,6 +23,20 @@ EIGHT = parse_hms("08:00")
 @pytest.fixture(scope="module")
 def world(timetable: Timetable, fixture_network_config: NetworkConfig) -> World:
     return World(timetable, fixture_network_config.area)
+
+
+@pytest.fixture(scope="module")
+def hops(timetable: Timetable, mini_gtfs_dir: Path) -> Hops:
+    return build_hops(mini_gtfs_dir, timetable)
+
+
+@pytest.fixture(scope="module")
+def shaped_world(timetable: Timetable, fixture_network_config: NetworkConfig, hops: Hops) -> World:
+    return World(timetable, fixture_network_config.area, hops)
+
+
+#: The fixture's eastbound M1 shape bends north through this point between West and Central.
+BEND = (47.5030, 19.0420)
 
 
 def node(world: World, name: str) -> int:
@@ -182,3 +197,56 @@ def test_server_serves_world_and_streams_snapshots(world: World) -> None:
         ws.send_json({"type": "keys", "up": True})
         ws.send_json({"type": "restart"})
         assert "clock" in ws.receive_json()
+
+
+def test_cut_shape_interpolates_the_ends() -> None:
+    points = [(0.0, 0.0), (0.0, 1.0), (1.0, 1.0)]
+    dists = [0.0, 10.0, 20.0]
+    assert cut_shape(points, dists, 5.0, 15.0) == [(0.0, 0.5), (0.0, 1.0), (0.5, 1.0)]
+    assert cut_shape(points, dists, 0.0, 10.0) == [(0.0, 0.0), (0.0, 1.0)]
+
+
+def test_hops_follow_the_shape_only_where_there_is_one(timetable: Timetable, hops: Hops) -> None:
+    for p in range(timetable.n_patterns):
+        stops = [timetable.node_name[n] for n in timetable.pattern_stops(p)]
+        if timetable.pat_route_name[p] == "M1" and stops == ["West", "Central", "East"]:
+            assert BEND in hops[p][0]
+            assert all(len(hop) >= 2 for hop in hops[p])
+        else:
+            assert all(hop == [] for hop in hops[p])
+
+
+def test_vehicle_follows_the_shape(shaped_world: World) -> None:
+    world = shaped_world
+    trip = m1_east_at_eight(world)
+    west, central = world.node_xy[node(world, "West")], world.node_xy[node(world, "Central")]
+    start = world.trip_state(trip, EIGHT)
+    assert start is not None and start.pos == west
+    bend = world.proj.to_xy(*BEND)
+    # Halfway in time is halfway along the bent path: near the bend, far north of the track.
+    half = world.trip_state(trip, EIGHT + 60)
+    assert half is not None and distance(half.pos, bend) < 30
+    assert half.pos[1] - west[1] > 250
+    arrive = world.trip_state(trip, EIGHT + 120)
+    assert arrive is not None and arrive.pos == central
+    previous = west
+    for s in range(1, 121):
+        state = world.trip_state(trip, EIGHT + s)
+        assert state is not None
+        assert distance(previous, state.pos) < 15  # ~1.4 km in 120 s: no jumps
+        previous = state.pos
+
+
+def test_world_view_draws_shaped_lines(shaped_world: World) -> None:
+    lines = world_view(shaped_world, LiveConfig())["lines"]
+    m1 = [line for line in lines if line["route"] == "M1"]
+    assert any(
+        any(abs(lat - BEND[0]) < 1e-6 and abs(lon - BEND[1]) < 1e-6 for lat, lon in line["path"])
+        for line in m1
+    )
+
+
+def test_hops_are_cached(timetable: Timetable, mini_gtfs_dir: Path, tmp_path: Path) -> None:
+    built = load_or_build_hops(mini_gtfs_dir, timetable, tmp_path)
+    assert (tmp_path / HOPS_FILE).is_file()
+    assert load_or_build_hops(tmp_path / "no-feed-here", timetable, tmp_path) == built
