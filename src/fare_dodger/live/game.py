@@ -627,7 +627,7 @@ def world_view(world: World, cfg: LiveConfig) -> dict[str, Any]:
             for n in range(tt.n_nodes)
         ],
         "lines": list(lines.values()),
-        "tiles": {"url": cfg.tile_url, "attribution": cfg.tile_attribution},
+        "tiles": {"url": cfg.tile_url, "glyphs": cfg.glyphs_url},
         "time_scale": cfg.time_scale,
         "ping_every_s": cfg.ping_every_s,
         "sight_radius_m": cfg.sight_radius_m,

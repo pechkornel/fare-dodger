@@ -248,10 +248,11 @@ class LiveConfig(_Frozen):
     start_role: Literal["dodger", "hunter"] = "dodger"
     #: Fixed seed for reproducible matches; ``None`` picks a new one per match.
     seed: int | None = None
-    tile_url: str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-    tile_attribution: str = (
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    )
+    #: TileJSON of OpenMapTiles-schema vector tiles (the client styles them and builds the
+    #: 3D houses from their footprints; attribution comes from the TileJSON) and the glyphs
+    #: for its labels.
+    tile_url: str = "https://tiles.openfreemap.org/planet"
+    glyphs_url: str = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf"
 
     @field_validator("start_time")
     @classmethod
