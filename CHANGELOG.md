@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Bots: RandomDodger, RandomInspectors, GreedyDodger (max-min Inspector travel time),
+  BeliefInspectors (sound belief set via multi-source RAPTOR, k-means coverage).
 - Rules engine (ADR 0003): simultaneous 10-minute rounds, journey validation, same-stop and
   same-vehicle catches, position/mode reveals, information-hiding views, random starts with a
   minimum travel-time distance, JSON replay log. `[rules]` section in the config.
