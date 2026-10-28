@@ -11,10 +11,16 @@ It is a *sound* over-approximation: it never excludes the Dodger's true position
   round without a catch.
 * After a reveal: collapse to the revealed station.
 
-To move, the team predicts the Dodger's possible positions at the end of this round, splits
-them into one geographic cluster per Inspector (seeded k-means), assigns Inspectors to
-clusters by travel time, and sends each Inspector to the reachable station closest to its
-cluster's centre, preferring stations inside the cluster where a catch is possible.
+To move, the team predicts the Dodger's possible positions at the end of this round
+(the *target area*) and places the Inspectors with one of two strategies:
+
+* ``coverage`` (default): greedy maximum coverage. Inspectors take turns, the most
+  constrained first. Each picks the reachable station that maximises the number of
+  target-area stations it could reach next round that no teammate covers yet, plus a bonus
+  for standing on a target-area station now (an immediate catch chance).
+* ``kmeans``: split the target area into one geographic cluster per Inspector (seeded
+  k-means), assign Inspectors to clusters by travel time, and send each to the reachable
+  station closest to its cluster's centre, preferring stations inside the cluster.
 """
 
 from __future__ import annotations
@@ -28,7 +34,7 @@ from fare_dodger.geo import metres_per_degree
 from fare_dodger.modes import ALL_VEHICLES_MASK, Mode, mask_of
 from fare_dodger.network.timetable import Timetable
 from fare_dodger.routing.journey import Journey
-from fare_dodger.routing.raptor import reachable
+from fare_dodger.routing.raptor import RaptorResult, reachable
 
 Point = tuple[float, float]
 
@@ -90,6 +96,9 @@ class BeliefState:
 
 class BeliefInspectors:
     name = "belief"
+    strategy = "coverage"
+    #: Coverage units credited for ending on a possible Dodger station.
+    catch_bonus = 2
 
     def __init__(self, tt: Timetable, seed: int, kmeans_iterations: int = 12) -> None:
         self.tt = tt
@@ -105,6 +114,45 @@ class BeliefInspectors:
         self.belief.update(view)
         target_area = sorted(self.belief.predict(view.window))
         reaches = [round_reach(self.tt, p, view.window) for p in view.positions]
+        if self.strategy == "coverage":
+            return self._move_coverage(view, target_area, reaches)
+        return self._move_kmeans(view, target_area, reaches)
+
+    def _move_coverage(
+        self, view: InspectorView, target_area: list[int], reaches: list[RaptorResult]
+    ) -> tuple[Journey, ...]:
+        targets = frozenset(target_area)
+        next_start = view.window[1]
+        span = view.window[1] - view.window[0]
+        cache: dict[int, frozenset[int]] = {}
+
+        def coverage(node: int) -> frozenset[int]:
+            if node not in cache:
+                arrivals = reachable(self.tt, [node], next_start, span).arrivals()
+                cache[node] = targets.intersection(arrivals)
+            return cache[node]
+
+        order = sorted(range(len(reaches)), key=lambda i: (len(reaches[i].reached()), i))
+        covered: set[int] = set()
+        taken: set[int] = set()
+        chosen: dict[int, Journey] = {}
+        for i in order:
+            options = [n for n in sorted(reaches[i].reached()) if n not in taken]
+            target = max(
+                options,
+                key=lambda n: (
+                    len(coverage(n) - covered) + (self.catch_bonus if n in targets else 0),
+                    -n,
+                ),
+            )
+            covered |= coverage(target)
+            taken.add(target)
+            chosen[i] = reaches[i].journey(target)
+        return tuple(chosen[i] for i in range(len(reaches)))
+
+    def _move_kmeans(
+        self, view: InspectorView, target_area: list[int], reaches: list[RaptorResult]
+    ) -> tuple[Journey, ...]:
         k = len(view.positions)
         centres, clusters = self._kmeans(target_area, k)
 
@@ -165,3 +213,10 @@ class BeliefInspectors:
                 break
             centres = new_centres
         return centres, groups
+
+
+class KMeansBeliefInspectors(BeliefInspectors):
+    """Same belief tracking, placement by k-means clusters (kept for comparison)."""
+
+    name = "belief-kmeans"
+    strategy = "kmeans"

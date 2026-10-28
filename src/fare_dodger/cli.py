@@ -6,6 +6,7 @@ import random
 import statistics
 import sys
 import time
+import tomllib
 from collections import Counter
 from pathlib import Path
 from typing import Annotated
@@ -13,14 +14,17 @@ from typing import Annotated
 import typer
 
 from fare_dodger import __version__
-from fare_dodger.config import NetworkConfig
+from fare_dodger.bots import DODGER_BOTS, INSPECTOR_BOTS
+from fare_dodger.config import NetworkConfig, RulesConfig
 from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
 from fare_dodger.modes import VEHICLE_MODES
 from fare_dodger.network.timetable import Timetable
 from fare_dodger.routing.raptor import reachable
+from fare_dodger.sim.report import rules_summary, summarise, write_reports
+from fare_dodger.sim.runner import run_matchups
 from fare_dodger.timeutil import format_hm, parse_hms
-from fare_dodger.workspace import Workspace, network_config
+from fare_dodger.workspace import Workspace, network_config, rules_config
 
 app = typer.Typer(
     name="fare-dodger",
@@ -201,3 +205,69 @@ def bench(
         f"p95 {p95:.2f} ms, max {timings[-1]:.2f} ms; "
         f"median {statistics.median(sizes):.0f} stations reached"
     )
+
+
+def _apply_overrides(rules: RulesConfig, overrides: list[str]) -> RulesConfig:
+    """Apply ``key=value`` rule overrides; values use TOML syntax (bare words are strings)."""
+    data = rules.model_dump()
+    for item in overrides:
+        key, sep, raw = item.partition("=")
+        if not sep:
+            raise typer.BadParameter(f"--rule expects key=value, got {item!r}")
+        try:
+            value = tomllib.loads(f"v = {raw}")["v"]
+        except tomllib.TOMLDecodeError:
+            value = raw
+        data[key.strip()] = value
+    return RulesConfig.model_validate(data)
+
+
+@app.command()
+def sim(
+    dodger: Annotated[str, typer.Option(help=f"Dodger bot: {', '.join(DODGER_BOTS)}")] = "greedy",
+    inspectors: Annotated[
+        str, typer.Option(help=f"Inspector bot: {', '.join(INSPECTOR_BOTS)}")
+    ] = "belief",
+    matrix: Annotated[bool, typer.Option(help="Run every Dodger x Inspector matchup")] = False,
+    games: Annotated[int, typer.Option(min=1, help="Games per matchup")] = 200,
+    seed: Annotated[int, typer.Option(help="Base seed; game i uses seed + i")] = 42,
+    workers: Annotated[int, typer.Option(min=1, help="Worker processes")] = 1,
+    rule: Annotated[
+        list[str] | None, typer.Option(help="Rule override key=value (repeatable)")
+    ] = None,
+    out: Annotated[Path, typer.Option(help="Output directory")] = Path("results"),
+    config: ConfigOpt = None,
+    data: DataDirOpt = None,
+) -> None:
+    """Simulate seeded bot-vs-bot games and write results.json, games.csv and summary.md."""
+    tt = _open_network(config, data)
+    rules = _apply_overrides(rules_config(config), rule or [])
+    if matrix:
+        matchups = [(d, i) for d in DODGER_BOTS for i in INSPECTOR_BOTS]
+    else:
+        matchups = [(dodger, inspectors)]
+    started = time.perf_counter()
+    results = run_matchups(tt, rules, matchups, games, seed, workers)
+    elapsed = time.perf_counter() - started
+    summaries = summarise(results)
+    rules_json = rules.model_dump(mode="json")
+    meta = {
+        "feed_version": tt.feed_version,
+        "service_date": tt.service_date,
+        "nodes": tt.n_nodes,
+        "network_config": tt.meta.get("config"),
+        "rules": rules_json,
+        "rules_summary": rules_summary(rules_json),
+        "matchups": [list(m) for m in matchups],
+        "games_per_matchup": games,
+        "base_seed": seed,
+    }
+    paths = write_reports(out, results, summaries, meta)
+    for s in summaries:
+        lo, hi = s.dodger_win_rate_ci95
+        typer.echo(
+            f"{s.dodger_bot:>7} vs {s.inspector_bot:<7} Dodger wins {s.dodger_win_rate:6.1%} "
+            f"[{lo:.0%}-{hi:.0%}]  survived {s.mean_rounds_survived:5.2f} rounds  "
+            f"catches {dict(s.catches_by_kind)}"
+        )
+    typer.echo(f"{len(results)} games in {elapsed:.1f}s -> " + ", ".join(str(p) for p in paths))
