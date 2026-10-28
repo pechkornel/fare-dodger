@@ -146,6 +146,54 @@ class NetworkConfig(_Frozen):
         return self.walk_speed_kmh / 3.6
 
 
+class RulesConfig(_Frozen):
+    """Game rules (v0). Expected to change, so every knob lives here."""
+
+    start_time: str = "08:00"
+    round_minutes: int = Field(default=10, gt=0)
+    rounds: int = Field(default=12, gt=0)
+    n_inspectors: int = Field(default=3, ge=1)
+    #: The Dodger's position is revealed after every ``reveal_every``-th round (0 = never).
+    reveal_every: int = Field(default=3, ge=0)
+    #: Also reveal the transport modes the Dodger used in every round.
+    reveal_modes: bool = False
+    #: Inspector positions are public at the end of every round.
+    inspectors_visible: bool = True
+    catch_on_same_stop: bool = True
+    catch_on_same_vehicle: bool = True
+    #: Minimum travel time (minutes) from every Inspector to the Dodger at the start.
+    min_start_distance_min: int = Field(default=20, ge=0)
+    #: Inspectors may not start at the same station.
+    distinct_inspector_starts: bool = True
+
+    @field_validator("start_time")
+    @classmethod
+    def _valid_start(cls, value: str) -> str:
+        parse_hms(value)
+        return value
+
+    @property
+    def start_seconds(self) -> int:
+        return parse_hms(self.start_time)
+
+    @property
+    def round_seconds(self) -> int:
+        return self.round_minutes * 60
+
+    def round_window(self, round_index: int) -> tuple[int, int]:
+        """``(start, end)`` of 0-based round ``round_index`` in service-day seconds."""
+        start = self.start_seconds + round_index * self.round_seconds
+        return start, start + self.round_seconds
+
+    def is_reveal_round(self, round_number: int) -> bool:
+        """Whether the Dodger is revealed after 1-based round ``round_number``."""
+        return self.reveal_every > 0 and round_number % self.reveal_every == 0
+
+    @property
+    def end_seconds(self) -> int:
+        return self.round_window(self.rounds - 1)[1]
+
+
 def data_dir() -> Path:
     """Directory for downloaded feeds and built networks (``./data`` by default)."""
     return Path(os.environ.get(DATA_DIR_ENV, "data")).resolve()

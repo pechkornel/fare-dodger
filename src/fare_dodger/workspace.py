@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from fare_dodger.config import NetworkConfig, data_dir, load_toml
+from fare_dodger.config import NetworkConfig, RulesConfig, data_dir, load_toml
 from fare_dodger.gtfs.download import ZIP_NAME, extract_feed, read_meta
 from fare_dodger.network.build import load_or_build
 from fare_dodger.network.timetable import Timetable
@@ -47,3 +47,10 @@ def network_config(path: Path | None) -> NetworkConfig:
     if path is None:
         return NetworkConfig()
     return NetworkConfig.model_validate(load_toml(path).get("network", {}))
+
+
+def rules_config(path: Path | None) -> RulesConfig:
+    """``[rules]`` section of a TOML file, or the defaults."""
+    if path is None:
+        return RulesConfig()
+    return RulesConfig.model_validate(load_toml(path).get("rules", {}))

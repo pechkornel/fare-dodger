@@ -23,3 +23,16 @@ kind = "circle"
 center_lat = 47.4979         # Deák Ferenc tér
 center_lon = 19.0544
 radius_m = 4500.0
+
+[rules]
+start_time = "08:00"
+round_minutes = 10
+rounds = 12
+n_inspectors = 3
+reveal_every = 3             # Dodger revealed after rounds 3, 6, 9, 12 (0 = never)
+reveal_modes = false         # also reveal the Dodger's modes each round
+inspectors_visible = true
+catch_on_same_stop = true
+catch_on_same_vehicle = true
+min_start_distance_min = 20
+distinct_inspector_starts = true
