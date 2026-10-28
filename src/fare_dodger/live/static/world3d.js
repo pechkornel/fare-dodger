@@ -84,15 +84,17 @@ function outlineMaterial(width) {
   });
 }
 
-const OUTLINE_PERSON = outlineMaterial(0.08);
-const OUTLINE_VEHICLE = outlineMaterial(0.22);
+const OUTLINE_PERSON = outlineMaterial(0.07);
+const OUTLINE_VEHICLE = outlineMaterial(0.15);
 
-// Seen through a building: a flat tinted silhouette, drawn only where something is in front.
+// Seen through a building: a flat silhouette, drawn only where something is in front. Ghosts
+// draw before the people themselves (render order 1 and 2), so a person never ghosts through
+// their own hat or backpack, only through houses and vehicles.
 const xrayCache = new Map();
 function xray(color) {
   if (!xrayCache.has(color)) {
     xrayCache.set(color, new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.55, depthFunc: THREE.GreaterDepth, depthWrite: false,
+      color: shade(color, 0.35), depthFunc: THREE.GreaterDepth, depthWrite: false,
     }));
   }
   return xrayCache.get(color);
@@ -112,18 +114,26 @@ function rbox(x, y, z, radius = 0.12, segments = 2) {
 function part(parent, geo, color, x, y, z, outline = null, xrayColor = null) {
   const mesh = new THREE.Mesh(geo, toon(color));
   mesh.position.set(x, y, z);
-  if (outline) mesh.add(new THREE.Mesh(geo, outline));
+  mesh.renderOrder = 2;
+  if (outline) {
+    const hull = new THREE.Mesh(geo, outline);
+    hull.renderOrder = 2;
+    mesh.add(hull);
+  }
   if (xrayColor) {
     const ghost = new THREE.Mesh(geo, xray(xrayColor));
-    ghost.renderOrder = 10;
+    ghost.renderOrder = 1;
     mesh.add(ghost);
   }
   parent.add(mesh);
   return mesh;
 }
 
-function coloured(geo, color, x, y, z) {
-  const g = geo.clone().translate(x, y, z);
+function coloured(geo, color, x, y, z, rotY = 0, rotX = 0) {
+  const g = geo.clone();
+  if (rotX) g.rotateX(rotX);
+  if (rotY) g.rotateY(rotY);
+  g.translate(x, y, z);
   const c = new THREE.Color(color);
   const n = g.attributes.position.count;
   const arr = new Float32Array(n * 3);
@@ -147,80 +157,274 @@ function shadow(parent, sx, sy) {
 
 // --- vehicles ------------------------------------------------------------------------------
 
-const VEHICLE_DIMS = {
-  // Chunkier than the real thing (about 2.5 m wide) so they read from above.
-  bus: [12, 3.4, 3.0], trolleybus: [12, 3.4, 3.0], tram: [22, 3.3, 3.2], metro: [28, 3.5, 3.1],
+// Real proportions, a little wider so they read from above. Sections are the rigid parts,
+// joined by bellows (articulated buses, trams) or couplers (metro cars), front first.
+// Axles and bogies are x offsets from their section's centre.
+const VEHICLES = {
+  bus: { sections: [12], width: 2.7, height: 2.95, floor: 0.4, wheel: 1.0,
+    axles: [[3.3, -2.6]], roofBox: true, mirrors: true },
+  trolleybus: { sections: [10.6, 7.4], width: 2.7, height: 2.95, floor: 0.4, wheel: 1.0,
+    axles: [[2.9, -3.4], [-1.6]], poles: true, mirrors: true },
+  tram: { sections: [8, 5.6, 5.6, 8], width: 2.55, height: 3.25, floor: 0.35, wheel: 0.75,
+    bogies: [[1.2], [], [0], [-1.2]], pantograph: 2, cabs: 2 },
+  metro: { sections: [17, 17, 17], width: 2.8, height: 3.1, floor: 0.95, wheel: 0.85,
+    bogies: [[5.8, -5.8], [5.8, -5.8], [5.8, -5.8]], cabs: 2, couplers: true },
 };
+const GLASS = "#a5d8f3";
+const VEHICLE_MAT = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap });
 
-function lighten(hex, amount) {
-  return "#" + new THREE.Color(hex).lerp(new THREE.Color("#ffffff"), amount).getHexString();
+function shade(hex, amount) {
+  const target = new THREE.Color(amount > 0 ? "#ffffff" : "#000000");
+  return "#" + new THREE.Color(hex).lerp(target, Math.abs(amount)).getHexString();
 }
 
-function makeVehicle(mode) {
-  const [L, W, H] = VEHICLE_DIMS[mode] || VEHICLE_DIMS.bus;
+// One merged, vertex-coloured mesh per mode, plus the outline hull of its sections.
+const vehicleTemplates = new Map();
+function vehicleTemplate(mode) {
+  if (vehicleTemplates.has(mode)) return vehicleTemplates.get(mode);
+  const spec = VEHICLES[mode] || VEHICLES.bus;
   const color = MODE_COLORS[mode] || "#888888";
+  const { width: W, height: H, floor: z0, wheel } = spec;
+  const gap = spec.couplers ? 1.1 : 0.7;
+  const total = spec.sections.reduce((a, b) => a + b, 0) + gap * (spec.sections.length - 1);
+  const parts = [];
+  const hulls = [];
+  const add = (geo, c, x, y, z, rotY = 0, rotX = 0) => {
+    parts.push(coloured(geo, c, x, y, z, rotY, rotX));
+  };
+  const top = z0 + H;
+  const cab = (x, dir) => {
+    // A driver's end: windscreen, destination sign, lights and bumper. dir +1 front, -1 back.
+    const end = x + dir * 0.02;
+    add(rbox(0.12, W * 0.86, H * 0.5, 0.05), GLASS, end, 0, z0 + H * 0.58);
+    add(rbox(0.14, W * 0.6, 0.32, 0.05), "#212529", end, 0, z0 + H * 0.9);
+    add(rbox(0.16, W * 0.42, 0.11, 0.03), "#ffb000", end + dir * 0.01, 0, z0 + H * 0.9);
+    for (const y of [-1, 1]) {
+      add(rbox(0.12, 0.42, 0.22, 0.06), "#fff3bf", end, y * (W / 2 - 0.42), z0 + 0.6);
+      add(rbox(0.13, 0.2, 0.16, 0.05), "#ff6b6b", end, y * (W / 2 - 0.16), z0 + 0.6);
+    }
+    add(rbox(0.32, W + 0.06, 0.32, 0.1), "#495057", x, 0, z0 + 0.2);
+  };
+  let front = total / 2;
+  spec.sections.forEach((L, i) => {
+    const xc = front - L / 2;
+    const body = coloured(rbox(L, W, H, 0.42, 3), color, xc, 0, z0 + H / 2);
+    parts.push(body);
+    hulls.push(body);
+    add(rbox(L - 0.1, W + 0.04, 0.45, 0.12), shade(color, -0.3), xc, 0, z0 + 0.25);
+    add(rbox(L - 0.3, W + 0.03, 0.12, 0.04), "#f8f9fa", xc, 0, z0 + H * 0.4);
+    add(rbox(L * 0.94, W * 0.86, 0.2, 0.08), shade(color, 0.45), xc, 0, top + 0.08);
+    // Window band split into panes by pillars.
+    const band = L - 0.7;
+    add(rbox(band, W + 0.05, H * 0.36, 0.12), GLASS, xc, 0, z0 + H * 0.63);
+    const panes = Math.max(2, Math.round(band / 1.7));
+    for (let k = 1; k < panes; k++) {
+      add(rbox(0.16, W + 0.09, H * 0.36, 0.04), color, xc - band / 2 + (k * band) / panes, 0,
+        z0 + H * 0.63);
+    }
+    // Doors on the right-hand side (-y): front, middle and rear on long sections.
+    const doors = L > 9 ? [L / 2 - 1.4, -0.3, -L / 2 + 1.6] : [0];
+    if (i > 0 && L > 9) doors.shift();
+    for (const dx of doors) {
+      const x = xc + dx;
+      add(rbox(1.25, 0.08, H * 0.82, 0.05), "#3d5a6c", x, -W / 2 - 0.02, z0 + H * 0.45);
+      add(rbox(0.5, 0.1, H * 0.4, 0.04), GLASS, x - 0.31, -W / 2 - 0.03, z0 + H * 0.57);
+      add(rbox(0.5, 0.1, H * 0.4, 0.04), GLASS, x + 0.31, -W / 2 - 0.03, z0 + H * 0.57);
+    }
+    for (const ax of (spec.axles || [])[i] || []) {
+      for (const y of [-1, 1]) {
+        add(rbox(wheel, 0.42, wheel, 0.3, 3), "#212529", xc + ax, y * (W / 2 - 0.12), wheel / 2);
+        add(rbox(wheel * 0.5, 0.06, wheel * 0.5, 0.1), "#ced4da", xc + ax, y * (W / 2 + 0.1),
+          wheel / 2);
+      }
+    }
+    for (const bx of (spec.bogies || [])[i] || []) {
+      add(rbox(2.7, W * 0.78, 0.4, 0.1), "#343a40", xc + bx, 0, wheel * 0.55);
+      for (const ax of [-0.95, 0.95]) {
+        for (const y of [-1, 1]) {
+          add(rbox(wheel, 0.2, wheel, 0.25, 3), "#495057", xc + bx + ax, y * W * 0.4, wheel / 2);
+        }
+      }
+    }
+    if (i === 0) {
+      cab(front, 1);
+      if (spec.mirrors) {
+        for (const y of [-1, 1]) {
+          add(rbox(0.55, 0.08, 0.08, 0.03), "#212529", front - 0.1, y * (W / 2 + 0.22), z0 + H * 0.75);
+          add(rbox(0.1, 0.16, 0.45, 0.04), "#212529", front - 0.1, y * (W / 2 + 0.48), z0 + H * 0.68);
+        }
+      }
+    }
+    const back = front - L;
+    if (i === spec.sections.length - 1) {
+      if (spec.cabs === 2) cab(back, -1);
+      else {
+        add(rbox(0.12, W * 0.7, H * 0.3, 0.05), GLASS, back - 0.02, 0, z0 + H * 0.66);
+        for (const y of [-1, 1]) {
+          add(rbox(0.12, 0.3, 0.34, 0.06), "#e03131", back - 0.02, y * (W / 2 - 0.3), z0 + 0.65);
+        }
+        add(rbox(0.32, W + 0.06, 0.32, 0.1), "#495057", back, 0, z0 + 0.2);
+      }
+    } else {
+      // Bellows or a coupler to the next section.
+      const jx = back - gap / 2;
+      if (spec.couplers) {
+        add(rbox(gap + 0.3, W * 0.6, H * 0.75, 0.1), "#343a40", jx, 0, z0 + H * 0.45);
+        add(rbox(gap + 0.4, 0.4, 0.35, 0.08), "#212529", jx, 0, z0 + 0.25);
+      } else {
+        add(rbox(gap + 0.35, W * 0.9, H * 0.86, 0.12), "#343a40", jx, 0, z0 + H * 0.47);
+        for (const dx of [-0.2, 0, 0.2]) {
+          add(rbox(0.06, W * 0.92, H * 0.84, 0.02), "#5c636a", jx + dx, 0, z0 + H * 0.47);
+        }
+      }
+    }
+    if (i === 0 && spec.roofBox) {
+      add(rbox(2.6, 1.8, 0.42, 0.15), "#dee2e6", xc - 1.2, 0, top + 0.3);
+      add(rbox(1.8, 1.2, 0.08, 0.03), "#adb5bd", xc - 1.2, 0, top + 0.53);
+    }
+    if (i === 0 && spec.poles) {
+      // Trolley poles, from a base at the back of the front section up to the wires.
+      const bx = back + 1.4;
+      add(rbox(1.8, 1.3, 0.35, 0.1), "#868e96", bx, 0, top + 0.25);
+      for (const y of [-0.4, 0.4]) {
+        add(rbox(6.6, 0.1, 0.1, 0.04), "#343a40", bx - 3.0, y, top + 1.35, 0.33);
+        add(rbox(0.3, 0.16, 0.16, 0.05), "#212529", bx - 6.1, y, top + 2.4);
+      }
+    }
+    if (i === spec.pantograph) {
+      // Pantograph: a folded arm on a base with a contact bar on top.
+      add(rbox(1.6, 1.2, 0.25, 0.08), "#868e96", xc, 0, top + 0.2);
+      add(rbox(1.7, 0.1, 0.1, 0.04), "#343a40", xc - 0.45, 0, top + 0.75, -0.75);
+      add(rbox(1.7, 0.1, 0.1, 0.04), "#343a40", xc - 0.45, 0, top + 1.75, 0.75);
+      add(rbox(0.16, 1.7, 0.1, 0.04), "#212529", xc - 1.07, 0, top + 2.36);
+    }
+    front = back - gap;
+  });
+  const template = {
+    geo: mergeGeometries(parts),
+    hull: mergeGeometries(hulls),
+    length: total, width: W, roof: top + 0.25,
+  };
+  vehicleTemplates.set(mode, template);
+  return template;
+}
+
+export function makeVehicle(mode) {
+  const t = vehicleTemplate(mode);
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
-  shadow(body, L * 0.58, W * 0.85);
-  const z0 = 0.45;
-  part(body, rbox(L, W, H, 0.55, 3), color, 0, 0, z0 + H / 2, OUTLINE_VEHICLE);
-  part(body, rbox(L * 0.93, W + 0.08, H * 0.34, 0.16), "#d6f0ff", 0, 0, z0 + H * 0.64);
-  part(body, rbox(L * 0.86, W * 0.8, 0.3, 0.12), lighten(color, 0.45), 0, 0, z0 + H + 0.1);
-  const wheel = rbox(1.0, 0.36, 1.0, 0.16);
-  for (const x of [-L * 0.33, L * 0.33]) {
-    for (const y of [-W / 2, W / 2]) part(body, wheel, INK, x, y, 0.5);
-  }
-  if (mode === "trolleybus") {
-    for (const y of [-0.45, 0.45]) {
-      const pole = part(body, rbox(5.2, 0.12, 0.12, 0.05), "#495057", -L * 0.2, y, z0 + H + 1.2);
-      pole.rotation.y = -0.38;
-    }
-  } else if (mode === "tram") {
-    part(body, rbox(1.6, 1.2, 0.5, 0.1), "#495057", 0, 0, z0 + H + 0.45);
-  }
-  return { root, body, roof: z0 + H + 0.3, length: L };
+  shadow(body, t.length * 0.56, t.width * 0.8);
+  body.add(new THREE.Mesh(t.geo, VEHICLE_MAT));
+  body.add(new THREE.Mesh(t.hull, OUTLINE_VEHICLE));
+  return { root, body, roof: t.roof, length: t.length };
 }
 
 // --- people --------------------------------------------------------------------------------
 
-function makePerson(kind) {
-  const color = ROLE_COLORS[kind];
-  const isHunter = kind === "hunter" || kind === "team";
+const OUTFITS = {
+  dodger: { top: "#40c057", trim: "#2b8a3e", pants: "#364fc7", shoes: "#f8f9fa",
+    hat: "#2b8a3e", hair: "#6b3e1f", pack: "#fab005" },
+  wanted: { top: "#ffd43b", trim: "#f59f00", pants: "#364fc7", shoes: "#f8f9fa",
+    hat: "#e8590c", hair: "#2b2118", pack: "#4dabf7" },
+  hunter: { top: "#fa5252", trim: "#c92a2a", pants: "#3b5b92", shoes: "#6b4226",
+    hat: "#9c6b3c", hair: "#4a2f1b", vest: "#6b4226", scarf: "#1c7ed6" },
+  team: { top: "#ffa8a8", trim: "#e64980", pants: "#3b5b92", shoes: "#6b4226",
+    hat: "#c08a52", hair: "#2b2118", vest: "#a47148", scarf: "#f59f00" },
+};
+
+export function makePerson(kind) {
+  const fit = OUTFITS[kind];
+  const cowboy = kind === "hunter" || kind === "team";
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
-  shadow(root, 0.75, 0.75);
+  shadow(root, 0.8, 0.8);
   const o = OUTLINE_PERSON;
   const legs = [];
   const arms = [];
-  for (const y of [-0.2, 0.2]) {
+
+  for (const side of [-1, 1]) {
     const hip = new THREE.Group();
-    hip.position.set(0, y, 0.62);
-    part(hip, rbox(0.34, 0.3, 0.62, 0.1), "#3b4a6b", 0, 0, -0.31, o);
+    hip.position.set(0, side * 0.19, 0.8);
+    part(hip, rbox(0.3, 0.28, 0.62, 0.1), fit.pants, 0, 0, -0.32, o);
+    if (cowboy) {
+      part(hip, rbox(0.42, 0.3, 0.3, 0.1), fit.shoes, 0.05, 0, -0.62, o);
+      part(hip, rbox(0.12, 0.28, 0.08, 0.03), INK, -0.12, 0, -0.78);
+    } else {
+      part(hip, rbox(0.46, 0.3, 0.17, 0.07), fit.shoes, 0.07, 0, -0.68, o);
+      part(hip, rbox(0.48, 0.32, 0.06, 0.03), "#adb5bd", 0.07, 0, -0.77);
+      part(hip, rbox(0.06, 0.31, 0.05, 0.02), fit.trim, 0.2, 0, -0.66);
+    }
     body.add(hip);
     legs.push(hip);
+
     const shoulder = new THREE.Group();
-    shoulder.position.set(0, y * 2.85, 1.32);
-    part(shoulder, rbox(0.26, 0.22, 0.6, 0.09), color, 0, 0, -0.26, o);
+    shoulder.position.set(0, side * 0.5, 1.44);
+    part(shoulder, rbox(0.24, 0.22, 0.5, 0.08), fit.top, 0, 0, -0.22, o);
+    part(shoulder, rbox(0.25, 0.23, 0.08, 0.03), fit.trim, 0, 0, -0.46);
+    part(shoulder, rbox(0.2, 0.2, 0.18, 0.07), SKIN, 0, 0, -0.58, o);
     body.add(shoulder);
     arms.push(shoulder);
   }
-  part(body, rbox(0.56, 0.92, 0.82, 0.2, 3), color, 0, 0, 1.03, o, color);
-  part(body, rbox(0.76, 0.76, 0.7, 0.22, 3), SKIN, 0, 0, 1.78, o, color);
-  for (const y of [-0.16, 0.16]) part(body, rbox(0.06, 0.1, 0.17, 0.03), INK, 0.39, y, 1.82);
-  if (isHunter) {
-    part(body, rbox(1.2, 1.2, 0.1, 0.05), "#8b5a2b", 0, 0, 2.17, o);
-    part(body, rbox(0.64, 0.64, 0.42, 0.14), "#9c6b3c", 0, 0, 2.4, o);
-    part(body, rbox(0.66, 0.66, 0.1, 0.04), INK, 0, 0, 2.27);
+
+  // Torso.
+  part(body, rbox(0.5, 0.82, 0.74, 0.18, 3), fit.top, 0, 0, 1.15, o, fit.top);
+  if (cowboy) {
+    for (const y of [-0.24, 0.24]) part(body, rbox(0.05, 0.3, 0.64, 0.03), fit.vest, 0.26, y, 1.15);
+    part(body, rbox(0.05, 0.8, 0.66, 0.03), fit.vest, -0.26, 0, 1.15);
+    part(body, rbox(0.52, 0.85, 0.1, 0.03), "#3d2b1f", 0, 0, 0.82);
+    part(body, rbox(0.04, 0.17, 0.11, 0.02), "#fcc419", 0.27, 0, 0.82);
+    const star = part(body, rbox(0.03, 0.13, 0.13, 0.01), "#ffd43b", 0.3, 0.24, 1.27);
+    part(star, rbox(0.03, 0.13, 0.13, 0.01), "#ffd43b", 0, 0, 0).rotation.x = Math.PI / 4;
+    part(body, rbox(0.52, 0.8, 0.1, 0.04), fit.scarf, 0, 0, 1.5);
+    part(body, rbox(0.04, 0.22, 0.2, 0.03), fit.scarf, 0.27, 0, 1.4).rotation.x = Math.PI / 4;
+    part(body, rbox(0.16, 0.08, 0.34, 0.04), "#6b4226", 0, -0.46, 0.76, o);
+    part(body, rbox(0.12, 0.1, 0.14, 0.03), "#495057", -0.02, -0.46, 0.98);
   } else {
-    const cap = kind === "dodger" ? "#2b8a3e" : "#e8590c";
-    part(body, rbox(0.82, 0.82, 0.24, 0.1), cap, 0, 0, 2.18, o);
-    part(body, rbox(0.42, 0.66, 0.08, 0.04), cap, 0.5, 0, 2.08, o);
+    part(body, rbox(0.05, 0.48, 0.2, 0.04), fit.trim, 0.25, 0, 0.98);
+    part(body, rbox(0.03, 0.04, 0.55, 0.01), "#f1f3f5", 0.26, 0, 1.18);
+    for (const y of [-0.1, 0.1]) part(body, rbox(0.03, 0.03, 0.18, 0.01), "#f8f9fa", 0.26, y, 1.36);
+    part(body, rbox(0.26, 0.62, 0.32, 0.1), fit.trim, -0.3, 0, 1.5);
+    part(body, rbox(0.3, 0.6, 0.6, 0.12), fit.pack, -0.4, 0, 1.13, o);
+    part(body, rbox(0.06, 0.42, 0.22, 0.05), shade(fit.pack, -0.25), -0.57, 0, 1.0);
+    for (const y of [-0.24, 0.24]) {
+      part(body, rbox(0.58, 0.09, 0.06, 0.02), shade(fit.pack, -0.35), -0.02, y, 1.52);
+      part(body, rbox(0.04, 0.09, 0.45, 0.02), shade(fit.pack, -0.35), 0.26, y, 1.28);
+    }
   }
+
+  // Head and face (the face looks along +x).
+  part(body, rbox(0.7, 0.72, 0.64, 0.2, 3), SKIN, 0, 0, 1.94, o, fit.top);
+  for (const y of [-0.38, 0.38]) part(body, rbox(0.14, 0.08, 0.18, 0.04), SKIN, 0, y, 1.92);
+  for (const y of [-0.15, 0.15]) {
+    part(body, rbox(0.04, 0.15, 0.17, 0.03), "#ffffff", 0.355, y, 1.97);
+    part(body, rbox(0.04, 0.08, 0.11, 0.02), INK, 0.37, y * 0.85, 1.96);
+    part(body, rbox(0.02, 0.03, 0.03, 0.005), "#ffffff", 0.39, y * 0.75, 1.99);
+    const brow = part(body, rbox(0.04, 0.16, 0.04, 0.01), fit.hair, 0.36, y, 2.09);
+    if (cowboy) brow.rotation.x = y > 0 ? 0.3 : -0.3;
+    part(body, rbox(0.02, 0.1, 0.06, 0.02), "#ffb3a7", 0.355, y * 1.5, 1.85);
+  }
+  part(body, rbox(0.08, 0.1, 0.1, 0.03), "#f4b183", 0.38, 0, 1.9);
+  part(body, rbox(0.03, 0.18, 0.04, 0.01), "#c0504d", 0.355, cowboy ? 0 : 0.04, 1.77);
+  part(body, rbox(0.2, 0.72, 0.34, 0.08), fit.hair, -0.3, 0, 2.02);
+  if (cowboy) {
+    part(body, rbox(0.06, 0.34, 0.08, 0.03), fit.hair, 0.38, 0, 1.82);
+    part(body, rbox(1.08, 1.0, 0.07, 0.03), shade(fit.hat, -0.15), 0, 0, 2.26, o);
+    for (const y of [-0.5, 0.5]) part(body, rbox(0.86, 0.1, 0.18, 0.04), shade(fit.hat, -0.15), 0, y, 2.32);
+    part(body, rbox(0.56, 0.58, 0.4, 0.14), fit.hat, 0, 0, 2.48, o);
+    part(body, rbox(0.58, 0.6, 0.09, 0.03), "#3d2b1f", 0, 0, 2.33);
+    part(body, rbox(0.32, 0.1, 0.07, 0.03), shade(fit.hat, -0.25), 0, 0, 2.68);
+  } else {
+    for (const y of [-0.36, 0.36]) part(body, rbox(0.3, 0.06, 0.22, 0.02), fit.hair, -0.1, y, 2.06);
+    part(body, rbox(0.76, 0.78, 0.24, 0.1), fit.hat, 0, 0, 2.29, o);
+    part(body, rbox(0.42, 0.66, 0.06, 0.03), fit.hat, 0.52, 0, 2.19, o);
+    part(body, rbox(0.1, 0.1, 0.06, 0.02), shade(fit.hat, 0.3), 0, 0, 2.43);
+  }
+
   // "!" bubble, above the head and not turning with the body.
   const bubble = new THREE.Group();
-  bubble.position.z = 3.2;
+  bubble.position.z = 3.4;
   part(bubble, rbox(0.7, 0.3, 0.9, 0.14), "#ffffff", 0, 0, 0, o);
   part(bubble, rbox(0.16, 0.08, 0.44, 0.04), "#e03131", 0, -0.17, 0.12);
   part(bubble, rbox(0.16, 0.08, 0.14, 0.04), "#e03131", 0, -0.17, -0.27);
@@ -240,13 +444,13 @@ function makeRing(color) {
 
 // --- trees and stops -----------------------------------------------------------------------
 
-const TREE_GEO = mergeGeometries([
+export const TREE_GEO = mergeGeometries([
   coloured(rbox(0.55, 0.55, 1.8, 0.12), "#8a5a3b", 0, 0, 0.9),
   coloured(rbox(2.7, 2.7, 2.1, 0.5, 3), "#4fbf5a", 0, 0, 2.6),
   coloured(rbox(1.8, 1.8, 1.3, 0.4, 3), "#7ad66a", 0.15, -0.1, 4.0),
 ]);
 
-const STOP_GEO = mergeGeometries([
+export const STOP_GEO = mergeGeometries([
   coloured(rbox(0.2, 0.2, 3.0, 0.06), "#868e96", 0, 0, 1.5),
   coloured(rbox(1.2, 0.18, 0.9, 0.1), "#ffd43b", 0, 0, 3.05),
   coloured(rbox(0.5, 0.2, 0.2, 0.05), "#2f9e44", 0, -0.02, 3.05),
@@ -283,6 +487,12 @@ const BUILDING_FRAG = `
   varying vec3 vPos;
   varying vec3 vNormal;
   float hash2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+  float hash1(float x) { return fract(sin(x * 91.7 + 13.1) * 43758.5453); }
+  // Anti-aliased rectangle [lo, hi] in p's space.
+  float rect(vec2 p, vec2 lo, vec2 hi, vec2 aa) {
+    vec2 m = smoothstep(lo - aa, lo + aa, p) * (1.0 - smoothstep(hi - aa, hi + aa, p));
+    return m.x * m.y;
+  }
   void main() {
     vec3 n = normalize(vNormal);
     float roofness = smoothstep(0.45, 0.75, n.z);
@@ -294,20 +504,73 @@ const BUILDING_FRAG = `
     float stripe = smoothstep(0.1, 0.2, plank) * (1.0 - smoothstep(0.85, 0.95, plank));
     vec3 roof = vRoof * mix(0.93 + 0.07 * stripe, 0.965, far);
     vec3 col = mix(vWall, roof, roofness);
-    if (abs(n.z) < 0.35) {
-      // Windows on a grid in metres along the wall, one row per storey.
+    if (abs(n.z) < 0.35 && vTop > 0.5) {
+      // Facade on a grid in metres along the wall: 3.2 m bays, 2.8 m storeys.
       vec2 t = normalize(vec2(-n.y, n.x) + 1e-5);
-      vec2 cell = vec2(dot(vPos.xy, t) / 3.2, (vPos.z - 0.4) / 2.8);
+      float u = dot(vPos.xy, t);
+      float z = vPos.z;
+      vec2 cell = vec2(u / 3.2, (z - 0.4) / 2.8);
       vec2 f = fract(cell);
-      vec2 aa = fwidth(cell) * 1.2;
-      float wx = smoothstep(0.3 - aa.x, 0.3 + aa.x, f.x) * (1.0 - smoothstep(0.7 - aa.x, 0.7 + aa.x, f.x));
-      float wy = smoothstep(0.25 - aa.y, 0.25 + aa.y, f.y) * (1.0 - smoothstep(0.75 - aa.y, 0.75 + aa.y, f.y));
-      float rows = step(1.6, vPos.z) * step(vPos.z, vTop - 1.4);
-      float lit = step(0.8, hash2(floor(cell) + vSeed));
-      vec3 glass = mix(vec3(0.42, 0.7, 0.92), vec3(1.0, 0.86, 0.35), lit);
-      float frame = step(0.24, f.x) * step(f.x, 0.76) * step(0.19, f.y) * step(f.y, 0.81) * rows;
-      col = mix(col, col * 0.62, frame);
-      col = mix(col, glass, wx * wy * rows);
+      vec2 aa = fwidth(cell) * 0.8 + 1e-4;
+      vec2 g = vec2(f.x, z);                       // ground floor: bay fraction, metres
+      vec2 ga = vec2(aa.x, fwidth(z) * 0.8 + 1e-4);
+      float detail = 1.0 - smoothstep(0.2, 0.45, max(aa.x, aa.y));
+      float row = floor(cell.y);
+
+      vec3 frame = mix(vWall, vec3(1.0), 0.7);
+      vec3 shutter = mix(vec3(0.27, 0.6, 0.38), vec3(0.3, 0.47, 0.8), hash1(vSeed + 3.0));
+      vec3 awning = hash1(vSeed + 5.0) > 0.5 ? vec3(0.92, 0.32, 0.3) : vec3(0.2, 0.62, 0.56);
+      vec3 wood = vec3(0.58, 0.35, 0.2);
+      float shutters = step(0.55, hash1(vSeed + 1.0));
+      float shop = step(0.45, hash1(vSeed + 2.0)) * step(7.0, vTop);
+      float balconies = step(0.6, hash1(vSeed + 4.0));
+      float lit = step(0.88, hash2(floor(cell) + vSeed));
+      vec3 glass = mix(vec3(0.45, 0.72, 0.92), vec3(1.0, 0.86, 0.4), lit);
+      float glint = rect(f, vec2(0.34, 0.55), vec2(0.42, 0.72), aa) * (1.0 - lit);
+      glass = mix(glass, vec3(0.88, 0.96, 1.0), glint * 0.7);
+
+      vec3 c = vWall;
+      if (z < 3.2) {
+        c = mix(c * 0.78, c, smoothstep(0.66, 0.7, z));               // stone plinth
+        if (shop > 0.5) {
+          c = mix(c, vec3(0.33, 0.28, 0.26), rect(g, vec2(0.07, 0.7), vec2(0.93, 2.5), ga));
+          c = mix(c, glass, rect(g, vec2(0.11, 0.76), vec2(0.89, 2.44), ga));
+          float stripes = step(0.5, fract(u / 0.7));
+          c = mix(c, mix(awning, vec3(1.0), stripes * 0.85),
+            rect(g, vec2(0.0, 2.6), vec2(1.0, 3.05), ga));
+        } else {
+          float door = step(0.7, hash2(vec2(floor(cell.x), vSeed + 7.0)));
+          float panel = 0.9 + 0.1 * step(0.5, fract(f.x * 10.0));
+          c = mix(c, frame, mix(rect(g, vec2(0.27, 1.15), vec2(0.73, 2.58), ga),
+            rect(g, vec2(0.27, 0.7), vec2(0.73, 2.75), ga), door));
+          c = mix(c, mix(glass, wood * panel, door), mix(
+            rect(g, vec2(0.31, 1.25), vec2(0.69, 2.5), ga),
+            rect(g, vec2(0.31, 0.7), vec2(0.69, 2.65), ga), door));
+          c = mix(c, vec3(0.95, 0.8, 0.3), door * rect(g, vec2(0.6, 1.55), vec2(0.64, 1.7), ga));
+        }
+      } else if (0.4 + (row + 1.0) * 2.8 <= vTop - 1.1) {
+        // Upper storeys: framed windows with sills and a cross, shutters, balconies.
+        c = mix(c, c * 0.9, rect(f, vec2(-1.0, 0.0), vec2(2.0, 0.025), aa));   // storey line
+        float win = rect(f, vec2(0.31, 0.25), vec2(0.69, 0.76), aa);
+        float sh = shutters * max(rect(f, vec2(0.15, 0.25), vec2(0.27, 0.76), aa),
+          rect(f, vec2(0.73, 0.25), vec2(0.85, 0.76), aa));
+        c = mix(c, shutter * (0.85 + 0.15 * step(0.5, fract(f.y * 18.0))), sh);
+        c = mix(c, frame, max(rect(f, vec2(0.27, 0.2), vec2(0.73, 0.8), aa),
+          rect(f, vec2(0.24, 0.14), vec2(0.76, 0.21), aa)));
+        c = mix(c, glass, win);
+        c = mix(c, frame, win * max(rect(f, vec2(0.49, 0.0), vec2(0.51, 1.0), aa),
+          rect(f, vec2(0.0, 0.56), vec2(1.0, 0.585), aa)));
+        float balcony = balconies * step(0.5, mod(row, 2.0));
+        c = mix(c, vec3(0.55, 0.53, 0.5), balcony * rect(f, vec2(0.2, 0.12), vec2(0.8, 0.2), aa));
+        float rail = max(rect(f, vec2(0.21, 0.42), vec2(0.79, 0.46), aa),
+          rect(f, vec2(0.21, 0.2), vec2(0.79, 0.44), aa) * step(0.6, fract(f.x * 16.0)));
+        c = mix(c, vec3(0.25, 0.25, 0.28), balcony * rail);
+      }
+      // Cornice under the roof, with a shadow line below it.
+      vec2 zc = vec2(0.5, z);
+      c = mix(c, c * 0.72, rect(zc, vec2(0.0, vTop - 1.18), vec2(1.0, vTop - 1.02), ga));
+      c = mix(c, frame, rect(zc, vec2(0.0, vTop - 1.02), vec2(1.0, vTop - 0.6), ga));
+      col = mix(vWall * 0.96, c, detail);
     }
     float ndl = dot(n, uLight);
     col *= ndl > 0.5 ? 1.0 : (ndl > 0.05 ? 0.84 : 0.7);
@@ -317,6 +580,18 @@ const BUILDING_FRAG = `
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
   }`;
+
+// Roof props share the houses' material: non-indexed, no uv, like ExtrudeGeometry.
+const propCache = new Map();
+function propGeo(x, y, z, radius) {
+  const key = `${x},${y},${z},${radius}`;
+  if (!propCache.has(key)) {
+    const g = rbox(x, y, z, radius).toNonIndexed();
+    g.deleteAttribute("uv");
+    propCache.set(key, g);
+  }
+  return propCache.get(key);
+}
 
 /** Replace each sharp corner of a ring with a short curve, so blocks have soft vertical edges. */
 function roundRing(ring, radius) {
@@ -551,8 +826,8 @@ export class ToyTown {
   buildSome() {
     const t0 = performance.now();
     while (this.queue.length && performance.now() - t0 < BUILD_BUDGET_MS) {
-      const geo = this.makeBuilding(this.queue.pop());
-      if (geo) this.pending.push(geo);
+      const geos = this.makeBuilding(this.queue.pop());
+      if (geos) this.pending.push(...geos);
       if (this.pending.length >= CHUNK_SIZE) this.flush();
     }
     // Show what is ready every so often, so the nearest houses appear first.
@@ -569,6 +844,40 @@ export class ToyTown {
     const mesh = new THREE.Mesh(merged, this.buildingMaterial);
     this.buildingMeshes.push(mesh);
     this.town.add(mesh);
+  }
+
+  // Chimneys on smaller roofs, air-conditioning boxes on big flat ones.
+  roofProps(ring, h, seed) {
+    const area = ringArea(ring);
+    const props = [];
+    if (area < 30) return props;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const v of ring) {
+      x0 = Math.min(x0, v.x); y0 = Math.min(y0, v.y); x1 = Math.max(x1, v.x); y1 = Math.max(y1, v.y);
+    }
+    const spot = (k) => {
+      for (let tries = 0; tries < 12; tries++) {
+        const x = x0 + (x1 - x0) * hash(seed * 31 + k * 7 + tries);
+        const y = y0 + (y1 - y0) * hash(seed * 57 + k * 11 + tries * 3);
+        if (pointInRing(x, y, ring)) return [x, y];
+      }
+      return null;
+    };
+    const big = area > 250;
+    const count = big ? 1 + Math.floor(hash(seed * 3) * 3) : Math.floor(hash(seed * 5) * 3);
+    for (let k = 0; k < count; k++) {
+      const at = spot(k);
+      if (!at) continue;
+      const [x, y] = at;
+      if (big && k % 2 === 0) {
+        props.push([propGeo(2.4, 1.8, 1.0, 0.18), x, y, h + 0.4, "#dee2e6", "#adb5bd"]);
+        props.push([propGeo(1.2, 1.2, 0.1, 0.04), x, y, h + 0.95, "#868e96", "#868e96"]);
+      } else {
+        props.push([propGeo(0.8, 0.8, 1.6, 0.12), x, y, h + 0.6, "#c8553d", "#c8553d"]);
+        props.push([propGeo(1.0, 1.0, 0.22, 0.06), x, y, h + 1.45, "#5c4033", "#5c4033"]);
+      }
+    }
+    return props;
   }
 
   makeBuilding({ poly, height, id }) {
@@ -593,24 +902,31 @@ export class ToyTown {
       return null;
     }
     geo.deleteAttribute("uv");
-    const n = geo.attributes.position.count;
-    if (!n) { geo.dispose(); return null; }
+    if (!geo.attributes.position.count) { geo.dispose(); return null; }
     const c = ring[0];
     const seed = hash(c.x * 0.37 + c.y * 1.71 + id * 0.013);
     const wall = new THREE.Color(WALLS[Math.floor(seed * WALLS.length)]);
     const roof = new THREE.Color(ROOFS[Math.floor(hash(seed * 91) * ROOFS.length)]);
     const inside = this.area(c.x, c.y) ? 1 : 0;
-    const attr = (size, values) => {
-      const arr = new Float32Array(n * size);
-      for (let i = 0; i < n; i++) arr.set(values, i * size);
-      return new THREE.BufferAttribute(arr, size);
+    const label = (g, wallColor, roofColor, top) => {
+      const n = g.attributes.position.count;
+      const attr = (size, values) => {
+        const arr = new Float32Array(n * size);
+        for (let i = 0; i < n; i++) arr.set(values, i * size);
+        return new THREE.BufferAttribute(arr, size);
+      };
+      g.setAttribute("wall", attr(3, [wallColor.r, wallColor.g, wallColor.b]));
+      g.setAttribute("roof", attr(3, [roofColor.r, roofColor.g, roofColor.b]));
+      g.setAttribute("top", attr(1, [top]));   // 0: no facade (chimneys and the like)
+      g.setAttribute("seed", attr(1, [seed * 100]));
+      g.setAttribute("inside", attr(1, [inside]));
+      return g;
     };
-    geo.setAttribute("wall", attr(3, [wall.r, wall.g, wall.b]));
-    geo.setAttribute("roof", attr(3, [roof.r, roof.g, roof.b]));
-    geo.setAttribute("top", attr(1, [h]));
-    geo.setAttribute("seed", attr(1, [seed * 100]));
-    geo.setAttribute("inside", attr(1, [inside]));
-    return geo;
+    const geos = [label(geo, wall, roof, h)];
+    for (const [base, x, y, z, side, cap] of this.roofProps(ring, h, seed)) {
+      geos.push(label(base.clone().translate(x, y, z), new THREE.Color(side), new THREE.Color(cap), 0));
+    }
+    return geos;
   }
 
   // --- actors ----------------------------------------------------------------------------
@@ -684,8 +1000,8 @@ export class ToyTown {
   animate(dt, zoom) {
     const mpp = (40075016.686 * Math.cos((this.world.center[0] * Math.PI) / 180)) /
       (512 * 2 ** zoom);
-    const personK = Math.max(1, (mpp * 56) / 2.2);   // about 56 px tall at any zoom
-    const vehicleK = Math.min(6, Math.max(1, (mpp * 48) / 12));
+    const personK = Math.max(1.2, (mpp * 34) / 2.6);              // about 34 px tall
+    const vehicleK = Math.min(3.2, Math.max(1.4, (mpp * 130) / 12));  // a bus about 130 px
     const follow = 1 - Math.exp(-dt * 12);
     const turn = 1 - Math.exp(-dt * 8);
     const t = this.time;
@@ -712,7 +1028,7 @@ export class ToyTown {
       const riding = rec.state === "ride";
       const mine = rec.trip !== null && this.vehicles.get(rec.trip);
       if (mine) rec.root.position.set(mine.pos.x, mine.pos.y, mine.roof * vehicleK);
-      else if (riding) rec.root.position.z = 3.6 * vehicleK;
+      else if (riding) rec.root.position.z = 3.6 * vehicleK;   // somewhere on a roof
       rec.root.scale.setScalar(personK);
       const walking = !riding && rec.speed > 0.4;
       const swing = walking ? Math.sin(t * 11) * 0.6 : 0;

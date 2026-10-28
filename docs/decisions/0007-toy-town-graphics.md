@@ -49,3 +49,34 @@ tinted OpenStreetMap raster tiles, which cannot tilt and has no building shapes.
 - Footprints on z14 tile borders can be duplicated or cut. This is rare and only cosmetic.
 - OpenFreeMap has no usage limits, but a public deployment should still check its terms or
   self-host the tiles.
+
+## Addendum (2026-10-28): more detail, smaller people, bigger vehicles
+The owner liked the houses but wanted more detail all round. Vehicles should be more realistic,
+characters less simple, and characters smaller relative to vehicles.
+- **Vehicles** are built from real proportions per mode (`VEHICLES`), as one merged,
+  vertex-coloured mesh per mode plus an outline hull.
+  - The bus is a 12 m solo bus with two axles, a roof AC unit and mirrors.
+  - The trolleybus is an 18 m articulated bus with three axles and trolley poles.
+  - The tram has four sections on three bogies, plus a pantograph.
+  - The metro is three cars on six bogies, with couplers.
+  - All get window panes split by pillars, three-part doors on the right-hand side,
+    windscreens, destination signs, lights, bumpers, a livery stripe, bellows between sections,
+    and hubcaps.
+- **Characters**
+  - The Dodger has a hoodie with pocket, zip and hood, a backpack with straps, a cap, sneakers
+    with soles, hair, ears, eyes with pupils and highlights, brows, nose, mouth and blush.
+  - The Bounty Hunter has a cowboy hat with a curled brim and band, a vest with a sheriff
+    star, a bandana, a belt buckle, a holster, boots with heels and a moustache.
+- **Scale:** people are about 34 px tall at any zoom (was 56). A bus is about 130 px long,
+  clamped to 1.4–3.2× real size.
+- **Silhouettes:** they are now solid and drawn before the people, so a character never shows
+  through their own hat or backpack.
+- **Houses**
+  - The facade shader adds a stone plinth and ground floors with doors or shopfronts under
+    striped awnings.
+  - Upper windows get frames, sills, cross bars and a glint. Some houses get shutters or
+    balconies with railings, and every house gets storey lines and a cornice with a shadow
+    line.
+  - Facade details fade to plain walls when far away, so they don't shimmer.
+  - Chimneys go on smaller roofs and AC boxes on big flat ones, merged into the house meshes.
+- `static/models.html` is a model sheet of every person and vehicle, for design work.

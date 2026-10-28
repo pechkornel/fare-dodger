@@ -24,6 +24,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   when zoomed out. Zoomed in, the camera tilts into a three.js 3D town of rounded-cube houses,
   trees, stops, vehicles and people. `tile_url` is now a TileJSON, with a new `glyphs_url`;
   `tile_attribution` is removed. ADR 0007.
+- Live game: detailed vehicles (articulated trolleybuses, multi-section trams, metro cars with
+  bogies), redesigned characters, facade details and roof props, and smaller people next to
+  bigger vehicles. `/models.html` shows every model. ADR 0007 addendum.
 
 ## [0.1.0] - 2026-10-28
 
