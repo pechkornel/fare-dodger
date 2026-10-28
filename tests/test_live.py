@@ -11,7 +11,14 @@ from fare_dodger.live.bots import Agent, journey_state
 from fare_dodger.live.game import Keys, LiveGame, Role, Status, world_view
 from fare_dodger.live.match import District, Match, match_winner, role_for
 from fare_dodger.live.server import create_app
-from fare_dodger.live.shapes import HOPS_FILE, Hops, build_hops, cut_shape, load_or_build_hops
+from fare_dodger.live.shapes import (
+    HOPS_FILE,
+    Hops,
+    build_hops,
+    cut_shape,
+    load_or_build_hops,
+    smooth_path,
+)
 from fare_dodger.live.world import World, distance
 from fare_dodger.network.timetable import Timetable
 from fare_dodger.routing.raptor import raptor
@@ -132,19 +139,20 @@ def test_hunter_on_foot_catches_nearby_dodger(world: World) -> None:
     assert game.status is Status.CAUGHT
 
 
-def test_riding_past_an_hunter_is_safe_but_stopping_is_not(world: World) -> None:
-    game = solo_game(world, "West")
-    west, central = world.node_xy[node(world, "West")], world.node_xy[node(world, "Central")]
-    mid = ((west[0] + central[0]) / 2, (west[1] + central[1]) / 2)
-    watcher = Agent(node(world, "West"), mid, node(world, "West"), needs_replan=False)
-    watcher.idle_until = 1e9  # stands still beside the track
-    game.hunters.agents = [watcher]
-    game.wait_for(0)
-    game.step(90)  # rides straight past the Bounty Hunter halfway to Central
-    assert game.status.value == "running"
-    watcher.pos = central
-    game.step(60)  # the train stands at Central next to the Bounty Hunter
-    assert game.status.value == "caught"
+def test_hunters_on_foot_catch_only_a_dodger_on_foot(world: World) -> None:
+    central = world.node_xy[node(world, "Central")]
+    for get_off in (False, True):
+        game = solo_game(world, "West")
+        watcher = Agent(node(world, "Central"), central, node(world, "Central"))
+        watcher.needs_replan, watcher.idle_until = False, 1e9  # stands at Central
+        game.hunters.agents = [watcher]
+        game.wait_for(0)
+        game.step(90)  # riding towards Central
+        if get_off:
+            game.use()
+        game.step(40)  # the train stops at Central at 08:02, next to the Bounty Hunter
+        expected = Status.CAUGHT if get_off else Status.RUNNING
+        assert game.status is expected
 
 
 def test_hunter_on_the_same_trip_catches(world: World) -> None:
@@ -194,13 +202,15 @@ def test_server_serves_districts_and_streams_a_match(world: World) -> None:
     assert client.get("/api/world/1").status_code == 404
     assert "maplibre-gl" in client.get("/").text
     with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "solo", "role": "dodger"})
         first = ws.receive_json()
+        assert first["type"] == "snapshot"
         assert first["status"] == "running" and first["player"]["state"] == "walk"
         assert first["match"]["round"] == 1 and first["match"]["role"] == "dodger"
-        assert first["match"]["score"] == {"you": 0, "bots": 0}
+        assert first["match"]["score"] == {"you": 0, "them": 0}
         ws.send_json({"type": "keys", "up": True})
         ws.send_json({"type": "next"})  # ignored: the round is still running
-        ws.send_json({"type": "restart"})
+        ws.send_json({"type": "restart"})  # ignored: the match is not over
         assert ws.receive_json()["match"]["round"] == 1
 
 
@@ -224,31 +234,46 @@ def test_hops_follow_the_shape_only_where_there_is_one(timetable: Timetable, hop
 def test_vehicle_follows_the_shape(shaped_world: World) -> None:
     world = shaped_world
     trip = m1_east_at_eight(world)
+    pattern = world.trip_pattern[trip]
     west, central = world.node_xy[node(world, "West")], world.node_xy[node(world, "Central")]
+    # Vehicles stand where the shape passes the platform, not at the merged station centre.
+    platform = world.proj.to_xy(47.5000, 19.0340)  # WST_1
     start = world.trip_state(trip, EIGHT)
-    assert start is not None and start.pos == west
+    assert start is not None and start.pos == world.stop_point(pattern, 0)
+    assert distance(start.pos, platform) < 1e-6 and 0 < distance(start.pos, west) < 15
     bend = world.proj.to_xy(*BEND)
     # Halfway in time is halfway along the bent path: near the bend, far north of the track.
     half = world.trip_state(trip, EIGHT + 60)
     assert half is not None and distance(half.pos, bend) < 30
     assert half.pos[1] - west[1] > 250
     arrive = world.trip_state(trip, EIGHT + 120)
-    assert arrive is not None and arrive.pos == central
-    previous = west
-    for s in range(1, 121):
+    assert arrive is not None and arrive.pos == world.stop_point(pattern, 1)
+    assert distance(arrive.pos, central) < 30
+    assert world.stop_distance(arrive.pos, node(world, "Central")) == 0
+    previous = start.pos
+    for s in range(1, 241):
         state = world.trip_state(trip, EIGHT + s)
         assert state is not None
-        assert distance(previous, state.pos) < 15  # ~1.4 km in 120 s: no jumps
+        assert distance(previous, state.pos) < 15  # ~1.4 km in 120 s: no jumps, even at stops
         previous = state.pos
+
+
+def test_pattern_paths_are_continuous_through_stops(shaped_world: World) -> None:
+    world = shaped_world
+    for p in range(world.tt.n_patterns):
+        hops = world._paths[p]
+        for (before, _), (after, _) in itertools.pairwise(hops):
+            assert before[-1] == after[0]
 
 
 def test_world_view_draws_shaped_lines(shaped_world: World) -> None:
     lines = world_view(shaped_world, LiveConfig())["lines"]
     m1 = [line for line in lines if line["route"] == "M1"]
+    bend = shaped_world.proj.to_xy(*BEND)
     assert any(
-        any(abs(lat - BEND[0]) < 1e-6 and abs(lon - BEND[1]) < 1e-6 for lat, lon in line["path"])
+        any(distance(shaped_world.proj.to_xy(lat, lon), bend) < 10 for lat, lon in line["path"])
         for line in m1
-    )
+    )  # through the bend (its corner rounded off a little)
 
 
 def test_hops_are_cached(timetable: Timetable, mini_gtfs_dir: Path, tmp_path: Path) -> None:
@@ -350,6 +375,8 @@ def finish_round(match: Match, won: bool) -> None:
     """End the current round with the human's side winning or losing."""
     game = match.game
     dodger_wins = won == (game.role is Role.DODGER)
+    for runner in game.runners:
+        runner.caught = not dodger_wins
     game.status = Status.ESCAPED if dodger_wins else Status.CAUGHT
     match.update()
 
@@ -369,7 +396,7 @@ def test_match_plays_rounds_switches_sides_and_ends(world: World) -> None:
     assert match.game.role is Role.HUNTER
     finish_round(match, True)  # 3-1: first to 3 of 4
     view = match.view()
-    assert view["winner"] == "you" and view["score"] == {"you": 3, "bots": 1}
+    assert view["winner"] == "you" and view["score"] == {"you": 3, "them": 1}
     assert [r["won"] for r in view["history"]] == [True, False, True, True]
     assert match.next_round() is False
 
@@ -419,3 +446,58 @@ def test_live_toml_districts() -> None:
     assert all(net.area.kind == "polygon" for _, net in districts)
     assert len({net.area.model_dump_json() for _, net in districts}) == len(districts)
     assert live_districts(None)[0][0] == "District"
+
+
+def test_smooth_path_drops_spikes_and_jitter_but_keeps_the_stops() -> None:
+    # A straight 300 m run with 0.5 m jitter and a 10 m out-and-back spike in the middle.
+    path = [(0.0, 0.0), (50.0, 0.4), (100.0, -0.3), (150.0, 0.0), (150.0, 10.0), (150.5, 0.2)]
+    path += [(200.0, -0.4), (300.0, 0.0)]
+    smooth = smooth_path(path)
+    assert smooth[0] == (0.0, 0.0) and smooth[-1] == (300.0, 0.0)
+    assert max(abs(y) for _, y in smooth) < 0.5
+    # A right angle gets rounded, inside the corner.
+    corner = smooth_path([(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)])
+    assert corner[0] == (0.0, 0.0) and corner[-1] == (100.0, 100.0)
+    assert (100.0, 0.0) not in corner and len(corner) > 3
+
+
+def test_server_starts_on_the_side_picked_in_the_menu_after_a_countdown(world: World) -> None:
+    client = TestClient(create_app([District("Fixture", world)], LiveConfig(seed=5)))
+    with client.websocket_connect("/ws?role=hunter") as ws:
+        first = ws.receive_json()
+        assert first["match"]["role"] == "hunter" and first["role"] == "hunter"
+        assert 0 < first["freeze_s"] <= LiveConfig().freeze_s
+        ws.send_json({"type": "use"})  # ignored during the countdown
+        assert ws.receive_json()["t"] == first["t"]  # the clock waits too
+    with client.websocket_connect("/ws?role=nonsense") as ws:
+        assert ws.receive_json()["match"]["role"] in ("dodger", "hunter")  # picked at random
+
+
+def test_vehicles_report_their_heading(world: World) -> None:
+    trip = m1_east_at_eight(world)
+    standing = world.trip_state(trip, EIGHT)
+    moving = world.trip_state(trip, EIGHT + 60)
+    assert standing is not None and moving is not None
+    assert standing.heading == pytest.approx(0.0, abs=0.05)  # M1 runs (nearly) due east
+    assert moving.heading == pytest.approx(0.0, abs=0.05)
+    game = solo_game(world, "West")
+    row = next(v for v in game.snapshot()["vehicles"] if v[0] == trip)
+    assert len(row) == 6 and row[5] == pytest.approx(standing.heading, abs=1e-3)
+
+
+def test_asking_to_get_off_can_be_cancelled(world: World) -> None:
+    game = solo_game(world, "West")
+    game.wait_for(0)
+    game.step(30)
+    game.use()  # get off at Central
+    assert game.snapshot()["ride"]["alight_at"] == "Central"
+    game.use()  # no, stay on
+    assert game.snapshot()["ride"]["alight_at"] is None
+    game.step(220)  # past Central, on to the end of the line at East
+    assert game.dodger.ride is None
+    assert game.dodger.pos == world.node_xy[node(world, "East")]
+
+
+def test_bounty_hunters_outnumber_the_dodger_by_two() -> None:
+    assert LiveConfig().n_hunters == 3
+    assert LiveConfig(hunter_extra=4).n_hunters == 5

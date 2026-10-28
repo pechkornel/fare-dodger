@@ -1,4 +1,4 @@
-# 0007. Toy-town graphics: flat when zoomed out, 3D when zoomed in
+# 0008. Toy-town graphics: flat when zoomed out, 3D when zoomed in
 
 - Status: accepted
 - Date: 2026-10-28
@@ -80,3 +80,24 @@ characters less simple, and characters smaller relative to vehicles.
   - Facade details fade to plain walls when far away, so they don't shimmer.
   - Chimneys go on smaller roofs and AC boxes on big flat ones, merged into the house meshes.
 - `static/models.html` is a model sheet of every person and vehicle, for design work.
+
+## Addendum (2026-10-28): riders inside, vehicles that bend, faster zoom
+After playing the combined game, the owner asked for three things: characters should not
+stand on the roof of the vehicle they ride, zooming should be faster, and vehicles should move
+less stiffly, bending at their joints.
+- **Riders** are hidden inside their vehicle. A pin in their colour floats above the roof
+  instead: bigger and bobbing for the player, red for a riding Bounty Hunter. Riders stay
+  easy to spot.
+- **Articulation:** vehicles are built from rigid sections plus joints (bellows or couplers),
+  each with its own origin.
+  - Every vehicle records the path it has driven, with its nose at the reported position.
+  - Each section is laid along that trail: placed between the trail points under its two
+    ends, and facing from one to the other.
+  - Joints sit between the sections, at their mean heading.
+  - Articulated trolleybuses and trams fold at their bellows, and metro cars at their
+    couplers.
+- **Suspension:** every section rolls out of curves (with the yaw rate), lifts its nose when
+  pulling away and dips it when braking, and jiggles slightly while moving.
+- **Zoom:** a wheel notch zooms about 0.6 (was 0.25), and +/− a whole level (was 0.75). The
+  camera eases about 90% of the way in a quarter of a second at any frame rate (was 18% per
+  frame).

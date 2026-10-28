@@ -10,8 +10,9 @@ that:
   Bounty Hunter is on or stop near a Bounty Hunter on foot.
 * At the destination it hides a little away from the station (the Bounty Hunters search
   stations) and dwells there before moving on.
-* A Bounty Hunter on foot within ``FLEE_M`` makes it give up waiting and walk straight away,
-  unless its vehicle is about to leave; it replans once the threat is gone.
+* A Bounty Hunter on foot within ``FLEE_M`` makes it give up waiting and walk away (along the
+  streets, steering like a human), unless its vehicle is about to leave; it replans once the
+  threat is gone.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fare_dodger.config import LiveConfig
+from fare_dodger.live.bots import leg_ends
 from fare_dodger.live.world import Departure, Point, World, distance
 from fare_dodger.routing.journey import Journey, RideLeg
 from fare_dodger.routing.raptor import raptor, reachable
@@ -66,7 +68,9 @@ class Step:
 
 
 class BotDodger:
-    def __init__(self, world: World, cfg: LiveConfig, rng: random.Random) -> None:
+    def __init__(self, world: World, cfg: LiveConfig, rng: random.Random, runner: int = 0) -> None:
+        #: Which of the round's Dodgers this bot plays.
+        self.runner = runner
         self.world = world
         self.cfg = cfg
         self.rng = rng
@@ -76,9 +80,15 @@ class BotDodger:
         #: Seen aboard since the current ride step began.
         self.riding = False
 
-    def control(self, game: LiveGame) -> Point | None:
-        """Act for this substep; returns the point to walk towards, if any."""
-        d, t = game.dodger, game.t
+    def control(self, game: LiveGame) -> tuple[Point | None, Point | None]:
+        """Act for this substep; returns the point to walk towards or the direction to walk
+        in (unit vector), if any."""
+        self.flee_dir: Point | None = None
+        target = self._target(game)
+        return target, self.flee_dir
+
+    def _target(self, game: LiveGame) -> Point | None:
+        d, t = game.runners[self.runner].traveller, game.t
         if d.held_until is not None:
             self.steps, self.riding = [], False
             self.next_plan = d.held_until
@@ -95,9 +105,9 @@ class BotDodger:
             elif not self.steps:
                 self.next_plan = t + self.rng.uniform(*DWELL_S)
 
-        flee = self._flee(game)
-        if flee is not None:
-            return flee
+        self.flee_dir = self._flee(game)
+        if self.flee_dir is not None:
+            return None
         if not self.steps and t >= self.next_plan:
             self._plan(game)
         if not self.steps:
@@ -113,7 +123,7 @@ class BotDodger:
         return self._board(game, step.leg)
 
     def _set_alight(self, game: LiveGame) -> None:
-        ride = game.dodger.ride
+        ride = game.runners[self.runner].traveller.ride
         leg = self.steps[0].leg if self.steps else None
         if (
             ride is not None
@@ -125,13 +135,13 @@ class BotDodger:
             ride.alight_pos = leg.alight_pos
 
     def _board(self, game: LiveGame, leg: RideLeg) -> Point | None:
-        d, t, world = game.dodger, game.t, self.world
+        d, t, world = game.runners[self.runner].traveller, game.t, self.world
         if t > leg.dep or any(s.trip == leg.trip for s, _ in game.hunter_states()):
             self.steps = []  # missed it, or a Bounty Hunter is aboard
             self.next_plan = t
             d.waiting_for = None
             return None
-        stop = world.node_xy[leg.from_node]
+        stop = world.stop_point(leg.pattern, leg.board_pos)
         if distance(d.pos, stop) > 0.5:
             return stop
         if d.waiting_for is None:
@@ -150,8 +160,8 @@ class BotDodger:
         return None
 
     def _flee(self, game: LiveGame) -> Point | None:
-        """Walk away from the closest Bounty Hunter on foot, if one is too close."""
-        d, t = game.dodger, game.t
+        """The direction away from the closest Bounty Hunter on foot, if one is too close."""
+        d, t = game.runners[self.runner].traveller, game.t
         threats = [s.pos for s, _ in game.hunter_states() if s.trip is None]
         if not threats:
             return None
@@ -169,7 +179,7 @@ class BotDodger:
             away = (math.cos(angle), math.sin(angle))
         else:
             away = ((d.pos[0] - near[0]) / gap, (d.pos[1] - near[1]) / gap)
-        return d.pos[0] + away[0] * 50, d.pos[1] + away[1] * 50
+        return away
 
     def _plan(self, game: LiveGame) -> None:
         t = game.t
@@ -177,7 +187,7 @@ class BotDodger:
             return
         self.last_plan = t
         self.steps, self.riding = [], False
-        world, d = self.world, game.dodger
+        world, d = self.world, game.runners[self.runner].traveller
         tt, xy = world.tt, world.node_xy
         origin = world.nearest_node(d.pos)
         if origin is None:
@@ -190,7 +200,8 @@ class BotDodger:
         hunters = game.hunter_states()
         on_foot = [s.pos for s, _ in hunters if s.trip is None]
         hunter_trips = {s.trip for s, _ in hunters if s.trip is not None}
-        ping = game.pings[-1].pos if game.pings else None
+        own = [p for p in game.pings if p.runner == self.runner]
+        ping = own[-1].pos if own else None
 
         def score(n: int) -> float:
             near = min((distance(xy[n], s.pos) for s, _ in hunters), default=0.0)
@@ -221,9 +232,9 @@ class BotDodger:
                 break
         if best is None:
             return
-        self.steps = [Step(xy[origin])] + [
-            Step(xy[leg.to_node], leg) if isinstance(leg, RideLeg) else Step(xy[leg.to_node])
-            for leg in best.legs
+        self.steps = [
+            Step(end, leg) if isinstance(leg, RideLeg) else Step(end)
+            for leg, (_, end) in zip(best.legs, leg_ends(world, best), strict=True)
         ]
         self.steps.append(Step(self._hiding_spot(xy[best.destination])))
 
@@ -234,5 +245,6 @@ class BotDodger:
             r = self.rng.uniform(*HIDE_M)
             spot = (station[0] + r * math.cos(angle), station[1] + r * math.sin(angle))
             if self.world.contains(spot):
-                return spot
+                streets = self.world.streets
+                return spot if streets is None else streets.point(streets.snap(spot))
         return station

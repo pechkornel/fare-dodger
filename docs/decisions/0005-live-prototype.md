@@ -79,3 +79,21 @@ for the chasers, and a choice between buying a ticket and riding without one.
   shadows, emoji characters (🏃 Dodger, 🤠 Bounty Hunters), vehicle badges per mode, tinted
   OpenStreetMap tiles, and a "KONTROLL!" burst on inspections. Motion respects
   `prefers-reduced-motion`. CARTO's styled tiles were tried, but they now need an API key.
+
+## Addendum (2026-10-28): smooth lines and stops at the platforms
+The owner saw route lines and vehicles wobble at the stops.
+- **Cause:** each hop ran from the merged station's centre to the platform on the shape and
+  back, so every line made a spike into the station centre at every stop. Merged stations
+  can be 150 m wide.
+- **Stops:** vehicles now stand where their shape passes the platform, and each pattern's
+  path is one continuous line through its stops. Travellers board and get off at those stop
+  points.
+  - A stop counts as "at the station" for boarding within `board_radius_m` of the centre,
+    the street point, or any of these platform points.
+  - Bot journeys walk between the platforms of their rides.
+- **Smoothing:** shape data is cleaned up when the world is built (`smooth_path`). The first
+  and last point of every hop (the stops) stay fixed.
+  - Out-and-back spikes are dropped: a turn of more than 135° within 25 m.
+  - A Douglas–Peucker pass removes jitter under 1.5 m.
+  - Two rounds of corner cutting round the bends, at most 8 m along each segment, so long
+    straights keep their corners on the street.

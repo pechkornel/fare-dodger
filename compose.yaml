@@ -1,0 +1,39 @@
+# Fare Dodger on a home server: `docker compose up -d` (the game on port 8001), plus
+# `docker compose --profile tunnel up -d` to publish it through a Cloudflare Tunnel.
+# Settings come from .env (see .env.example).
+name: fare-dodger
+
+services:
+  game:
+    build: .
+    image: fare-dodger:0.2.0
+    # Runs as your user so ./data stays yours (set PUID/PGID in .env; `id -u`, `id -g`).
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "${GAME_BIND:-0.0.0.0}:8001:8001"
+    volumes:
+      - ./data:/app/data
+    environment:
+      FARE_DODGER_MAX_MATCHES: ${FARE_DODGER_MAX_MATCHES:-20}
+      FARE_DODGER_MAX_MATCHES_PER_IP: ${FARE_DODGER_MAX_MATCHES_PER_IP:-2}
+      FARE_DODGER_IDLE_S: ${FARE_DODGER_IDLE_S:-120}
+    restart: unless-stopped
+    mem_limit: ${GAME_MEMORY:-1536m}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10m
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.5
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}  # from .env; cloudflared refuses to start without it
+    depends_on:
+      game:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 256m
+    profiles: ["tunnel"]

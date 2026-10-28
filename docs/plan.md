@@ -5,7 +5,7 @@ BKK network. Phase 1 covers the rules engine, transit routing, bots and simulati
 UI yet. This file holds the approved plan and the current status. Decisions with lasting
 consequences are recorded in [`decisions/`](decisions/).
 
-*Last updated: 2026-10-28 (phase 1 released as v0.1.0; phase 2 live prototype in progress)*.
+*Last updated: 2026-10-28 (phase 1 released as v0.1.0; the online live game as v0.2.0)*.
 
 ## Status at a glance
 
@@ -195,10 +195,28 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
 - ✅ Matches: first to 6 rounds, sides switch at halftime and every overtime round (win by
   two), a playable Bounty Hunter side with a bot Dodger, and six districts in rotation
   (`feat/live-match`, ADR 0006).
+- ✅ Walking along OpenStreetMap streets, a slower clock (6×) with faster jogging (10 km/h), and
+  catches only on the same vehicle or with both on foot (`feat/live-streets`, ADR 0007).
+- ✅ Smooth route lines: vehicles stop at their platforms on the shape, no spikes into station
+  centres, cleaned-up shapes (`feat/live-smooth-lines`, ADR 0005 addendum).
 - ✅ Toy-town graphics: flat cartoon vector map zoomed out, a tilted 3D rounded-cube town
-  zoomed in (`feat/toon-3d`, ADR 0007).
-- Next: playtest and tune the bot Dodger, prices and radii per side, and polish the graphics
-  (the owner wants more). Then street walking. Multiplayer is further away.
+  zoomed in (`feat/toon-3d`, ADR 0008).
+- ✅ Graphics combined with street walking and smooth lines (`feat/live-toon`).
+- ✅ Riders inside vehicles, articulated vehicles with suspension, faster zoom, and coffee at
+  real cafés for a speed boost (`feat/live-motion`, ADR 0008 addendum, ADR 0009).
+- ✅ Main menu, round timer and countdown, minimaps (reports for hunters, none of the hunters
+  for the Dodger), ping arrows, a get-on/get-off switch with cancel, Bounty Hunters = Dodgers
+  + 2, walkable parks and squares, and vehicles that spawn facing their way
+  (`feat/live-menu-minimap`, ADR 0010).
+- ✅ Online rooms (create 1v1/2v2/3v3, join by code, solo), bots in empty places, hunters +2,
+  a random first side, points per Dodger, safety caps, automatic service date, vendored front
+  end, Docker Compose with Cloudflare Tunnel; released as 0.2.0 (`feat/online-deploy`,
+  ADR 0011).
+- Next: play online with friends and tune (bot strength, `hunter_extra` per room size, round
+  length); spectating for caught players beyond following the team; persistent player names
+  and stats.
+- Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and keep
+  polishing the graphics. Multiplayer is further away.
 
 ### Next (phase 1 follow-ups)
 1. Decide whether to adopt the suggested v1 rules (`reveal_modes = true`, `reveal_every = 2`)

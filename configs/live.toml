@@ -3,9 +3,14 @@
 # code defaults; each [[district]] below replaces [network.area] with its own polygon.
 
 [network]
-service_date = "2026-11-17"   # same pinned Tuesday as configs/default.toml
+# "auto": the Tue/Wed/Thu with the most trips inside the downloaded feed's validity, so the
+# server keeps working when BKK publishes a new feed. Set a date ("2026-11-17") to pin it.
+service_date = "auto"
 window_start = "07:30"
 window_end = "09:30"
+# RAPTOR's walking transfers use the live game's jogging speed, along streets (detour).
+walk_speed_kmh = 10.0
+walk_detour_factor = 1.3
 station_overrides = "station_overrides.toml"
 
 [network.area]
@@ -24,11 +29,12 @@ vertices = [
 
 [live]
 start_time = "08:00"
-duration_minutes = 30
-time_scale = 10.0            # timetable seconds per real second (30 min = 3 real minutes)
+duration_minutes = 25
+time_scale = 6.0             # timetable seconds per real second (25 min = about 4 real minutes)
 ping_every_s = 180           # the Bounty Hunters learn the Dodger's position this often
-n_hunters = 3
-walk_speed_kmh = 5.0
+hunter_extra = 2             # Bounty Hunters = Dodgers + 2 (bots fill the team)
+freeze_s = 3.0               # real seconds of countdown before each round
+walk_speed_kmh = 10.0        # a brisk jog; walking is along the streets
 catch_radius_m = 25.0        # Bounty Hunter on foot this close to an exposed Dodger
 sight_radius_m = 100.0       # Bounty Hunters on foot chase a Dodger on foot within this
 board_radius_m = 40.0        # stand this close to a stop to wait for a vehicle
@@ -40,6 +46,14 @@ inspected_share = 0.35       # trips with ticket inspectors aboard (hidden until
 fine_ft = 1000               # caught without a ticket; game over if you cannot pay
 fine_hold_s = 60             # held at the next stop while the fine is processed
 fine_alerts_hunters = true   # the inspectors report you to the Bounty Hunters
+# Coffee (the Dodger only): real cafés from OpenStreetMap, a few per district. Press C at one:
+# 500 Ft, 3 real seconds standing still, then 20 real seconds running almost as fast as a bus.
+cafes_per_district = 4
+cafe_radius_m = 25.0
+coffee_price_ft = 500
+coffee_brew_s = 18           # timetable seconds (3 real seconds at 6x)
+coffee_boost_s = 120         # timetable seconds (20 real seconds at 6x)
+coffee_speed_kmh = 16.0      # jogging is 10; buses and trams average 15-20
 # Match: first to win more than half of the regulation rounds (6 of 10); sides switch at
 # halftime; at 5-5, sides switch every round until one team leads by two.
 regulation_rounds = 10

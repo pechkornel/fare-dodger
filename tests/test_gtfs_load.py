@@ -61,3 +61,25 @@ def test_stop_ids_keep_leading_zeros(tmp_path: Path, mini_gtfs_dir: Path) -> Non
     assert "008271" in set(feed.stops["stop_id"])
     assert "008271" in set(feed.stop_times["stop_id"])
     assert feed.feed_version == "unknown"
+
+
+def test_auto_service_date_stays_inside_the_feed_validity(tmp_path: Path) -> None:
+    import shutil
+    from datetime import date
+
+    from fare_dodger.gtfs.load import feed_validity, pick_service_date
+
+    feed = tmp_path / "feed"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "mini_gtfs", feed)
+    assert feed_validity(feed) is None
+    assert pick_service_date(feed) == date(2026, 11, 4)  # most trips, earliest
+    (feed / "feed_info.txt").write_text(
+        "feed_publisher_name,feed_publisher_url,feed_lang,feed_start_date,feed_end_date,"
+        "feed_version\nFixture,https://example.invalid,en,20261105,20261130,fixture-2\n",
+        encoding="utf-8",
+    )
+    assert feed_validity(feed) == (date(2026, 11, 5), date(2026, 11, 30))
+    assert pick_service_date(feed) == date(2026, 11, 5)  # the 4th is before the validity
+    assert pick_service_date(feed, date(2026, 11, 5)) == date(2026, 11, 5)
+    with pytest.raises(ValueError, match="valid 2026-11-05 to 2026-11-30"):
+        pick_service_date(feed, date(2026, 11, 4))

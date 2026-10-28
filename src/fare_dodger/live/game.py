@@ -11,10 +11,10 @@ on the next boarding. Ticket inspectors ride a hidden share of the trips. Caught
 ticket, the Dodger is put off at the next stop and held there while the fine is processed
 (and reported to the Bounty Hunters), then pays; a Dodger who cannot pay loses.
 
-The Bounty Hunters win when one of them rides the same trip as the Dodger, or is on foot
-within ``catch_radius_m`` while the Dodger is exposed: on foot (or held), or on a vehicle that
-is standing at a stop. They learn the Dodger's position every ``ping_every_s`` and see a
-Dodger who is not riding within ``sight_radius_m``. The Dodger always sees the Bounty Hunters
+The Bounty Hunters win when one of them rides the same trip as the Dodger, or when both are
+on foot (waiting at a stop and being held count as on foot) within ``catch_radius_m``. They
+learn the Dodger's position every ``ping_every_s`` and see a Dodger who is not riding within
+``sight_radius_m``. The Dodger always sees the Bounty Hunters
 and wins by lasting ``duration_minutes``.
 """
 
@@ -28,6 +28,7 @@ from typing import Any
 from fare_dodger.config import LiveConfig
 from fare_dodger.live.bots import AgentState, BountyHunters, Ping
 from fare_dodger.live.dodger_bot import BotDodger
+from fare_dodger.live.streets import EdgePos, RouteFollower
 from fare_dodger.live.world import Departure, Point, World, distance
 from fare_dodger.routing.raptor import reachable
 from fare_dodger.timeutil import format_hms
@@ -37,6 +38,10 @@ DEPARTURE_HORIZON_S = 15 * 60
 DEPARTURE_LIMIT = 6
 #: Movement and catches are evaluated at least this often (timetable seconds).
 MAX_SUBSTEP_S = 1.0
+#: Leaving a park, a street this close is stepped onto (metres).
+PARK_EXIT_M = 15.0
+#: Open ground this far ahead (across a pavement) can be walked onto (metres).
+PARK_ENTER_M = 12.0
 
 
 class Status(StrEnum):
@@ -97,6 +102,14 @@ class Traveller:
     fines: int = 0
     #: Held at a stop until this time while a fine is processed.
     held_until: float | None = None
+    #: Standing at a café until this time while a coffee is made.
+    brewing_until: float | None = None
+    #: Running on coffee until this time.
+    boosted_until: float | None = None
+    coffees: int = 0
+    #: Where on the street graph, when walking on streets (``None``: snap on the next step).
+    street: EdgePos | None = None
+    follower: RouteFollower = field(default_factory=RouteFollower)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,107 +118,280 @@ class Event:
     text: str
 
 
+@dataclass(frozen=True, slots=True)
+class Seat:
+    """A place in a round: a human player (their id) or a bot (``player`` is ``None``)."""
+
+    player: str | None
+    name: str
+
+
 @dataclass
+class Runner:
+    """A Dodger in the round."""
+
+    index: int
+    name: str
+    traveller: Traveller
+    player: str | None = None
+    bot: BotDodger | None = None
+    caught: bool = False
+
+
+@dataclass
+class Human:
+    """A human player in the round, on either side."""
+
+    role: Role
+    name: str
+    traveller: Traveller
+    keys: Keys = field(default_factory=Keys)
+    events: list[Event] = field(default_factory=list)
+    #: Their Dodger, when they run.
+    runner: Runner | None = None
+
+
+#: The human in a single-player round.
+YOU = "you"
+
+
 class LiveGame:
-    world: World
-    cfg: LiveConfig
-    seed: int
-    role: Role = Role.DODGER
-    t: float = field(init=False)
-    status: Status = field(init=False, default=Status.RUNNING)
-    keys: Keys = field(init=False, default_factory=Keys)
-    pings: list[Ping] = field(init=False, default_factory=list)
-    caught_by: str | None = field(init=False, default=None)
-    _events: list[Event] = field(init=False, default_factory=list)
+    """One round. ``runners`` and ``hunters`` are the two teams' seats (humans or bots); the
+    Bounty Hunters also get ``cfg.hunter_extra`` more bots. Without seats it is a
+    single-player round: you play ``role``, everyone else is a bot."""
 
-    def __post_init__(self) -> None:
-        self.t = float(self.cfg.start_seconds)
-        self.next_ping = self.cfg.start_seconds + self.cfg.ping_every_s
-        rng = random.Random(self.seed)
-        dodger_node, hunter_nodes = self._starts(rng)
-        xy, names = self.world.node_xy, self.world.tt.node_name
-        self.dodger = Traveller(xy[dodger_node], money=self.cfg.start_money_ft)
-        # A separate stream, so the inspected trips do not change the start positions.
-        inspected = random.Random(f"{self.seed}:inspected")
-        self.inspected = frozenset(
-            trip
-            for trip in range(self.world.tt.n_trips)
-            if inspected.random() < self.cfg.inspected_share
+    def __init__(
+        self,
+        world: World,
+        cfg: LiveConfig,
+        seed: int,
+        role: Role = Role.DODGER,
+        *,
+        runners: list[Seat] | None = None,
+        hunters: list[Seat] | None = None,
+    ) -> None:
+        self.world, self.cfg, self.seed = world, cfg, seed
+        if runners is None or hunters is None:
+            you, bot = Seat(YOU, "You"), Seat(None, "Bot")
+            runners, hunters = ([you], [bot]) if role is Role.DODGER else ([bot], [you])
+        self.t = float(cfg.start_seconds)
+        self.status = Status.RUNNING
+        self.pings: list[Ping] = []
+        self.caught_by: str | None = None
+        self.next_ping = cfg.start_seconds + cfg.ping_every_s
+        rng = random.Random(seed)
+        n_bot_hunters = sum(s.player is None for s in hunters) + cfg.hunter_extra
+        human_hunters = [s for s in hunters if s.player is not None]
+        runner_nodes, hunter_nodes = self._starts(
+            rng, len(runners), len(human_hunters) + n_bot_hunters
         )
-        self.dodger_bot: BotDodger | None = None
-        if self.role is Role.DODGER:
-            self.player = self.dodger
-            self.hunters = BountyHunters(self.world, self.cfg, hunter_nodes, rng)
-            self._emit("start", f"You start at {names[dodger_node]}. Stay hidden!")
-        else:
-            self.player = Traveller(xy[hunter_nodes[0]], pays_fares=False)
-            self.hunters = BountyHunters(self.world, self.cfg, hunter_nodes[1:], rng)
-            self.dodger_bot = BotDodger(self.world, self.cfg, random.Random(f"{self.seed}:bot"))
-            self._emit(
-                "start",
-                f"You are a Bounty Hunter at {names[hunter_nodes[0]]}. Find the Dodger!",
+        xy, names = world.node_xy, world.tt.node_name
+        # A separate stream, so the inspected trips do not change the start positions.
+        inspected = random.Random(f"{seed}:inspected")
+        self.inspected = frozenset(
+            trip for trip in range(world.tt.n_trips) if inspected.random() < cfg.inspected_share
+        )
+        self.humans: dict[str, Human] = {}
+        self.runners: list[Runner] = []
+        for i, (seat, node) in enumerate(zip(runners, runner_nodes, strict=True)):
+            runner = Runner(
+                i, seat.name, Traveller(xy[node], money=cfg.start_money_ft), seat.player
             )
+            if seat.player is None:
+                runner.bot = BotDodger(world, cfg, random.Random(f"{seed}:bot{i}"), i)
+            else:
+                self.humans[seat.player] = Human(
+                    Role.DODGER, seat.name, runner.traveller, runner=runner
+                )
+            self.runners.append(runner)
+        for seat, node in zip(human_hunters, hunter_nodes, strict=False):
+            assert seat.player is not None
+            self.humans[seat.player] = Human(
+                Role.HUNTER, seat.name, Traveller(xy[node], pays_fares=False)
+            )
+        self.hunters = BountyHunters(world, cfg, hunter_nodes[len(human_hunters) :], rng)
+        self.default_player = next(iter(self.humans), None)
+        for pid, human in self.humans.items():
+            here = names[world.nearest_node(human.traveller.pos) or 0]
+            if human.role is Role.DODGER:
+                self._emit("start", f"You start at {here}. Stay hidden!", to=[pid])
+            else:
+                self._emit(
+                    "start", f"You are a Bounty Hunter at {here}. Find the Dodgers!", to=[pid]
+                )
 
-    def _starts(self, rng: random.Random) -> tuple[int, list[int]]:
-        """Random starts at stations with onward departures (not dead ends at the area edge),
-        every Bounty Hunter at least ``min_start_distance_min`` away when possible."""
-        world, k = self.world, self.cfg.n_hunters
+    def _starts(
+        self, rng: random.Random, n_runners: int, n_hunters: int
+    ) -> tuple[list[int], list[int]]:
+        """Random starts at stations with onward departures (not dead ends at the area edge):
+        the Dodgers apart, every Bounty Hunter at least ``min_start_distance_min`` from every
+        Dodger when possible."""
+        world = self.world
         nodes = world.boarding_nodes or list(range(world.tt.n_nodes))
-        dodger = rng.choice(nodes)
+        runners = (
+            rng.sample(nodes, n_runners)
+            if len(nodes) >= n_runners
+            else [rng.choice(nodes) for _ in range(n_runners)]
+        )
         near = set(
             reachable(
-                world.tt, [dodger], self.cfg.start_seconds, self.cfg.min_start_distance_min * 60
+                world.tt, runners, self.cfg.start_seconds, self.cfg.min_start_distance_min * 60
             ).reached()
         )
         far = [n for n in nodes if n not in near]
-        if len(far) >= k:
-            return dodger, rng.sample(far, k)
-        others = sorted(
-            (n for n in nodes if n != dodger),
-            key=lambda n: (-distance(world.node_xy[n], world.node_xy[dodger]), n),
-        ) or [dodger]
-        return dodger, [others[i % len(others)] for i in range(k)]
+        if len(far) >= n_hunters:
+            return runners, rng.sample(far, n_hunters)
+        others = (
+            sorted(
+                (n for n in nodes if n not in runners),
+                key=lambda n: (
+                    -min(distance(world.node_xy[n], world.node_xy[r]) for r in runners),
+                    n,
+                ),
+            )
+            or runners
+        )
+        return runners, [others[i % len(others)] for i in range(n_hunters)]
+
+    # --- the single-player shortcuts ------------------------------------------------------
+
+    @property
+    def dodger(self) -> Traveller:
+        """The first Dodger (the only one in a single-player round)."""
+        return self.runners[0].traveller
+
+    @property
+    def player(self) -> Traveller:
+        """The default human's traveller."""
+        return self.humans[self._pid(None)].traveller
+
+    @property
+    def role(self) -> Role:
+        return self.humans[self._pid(None)].role
+
+    @property
+    def keys(self) -> Keys:
+        return self.humans[self._pid(None)].keys
+
+    @keys.setter
+    def keys(self, keys: Keys) -> None:
+        self.humans[self._pid(None)].keys = keys
+
+    @property
+    def dodger_bot(self) -> BotDodger | None:
+        return self.runners[0].bot
+
+    @dodger_bot.setter
+    def dodger_bot(self, bot: BotDodger | None) -> None:
+        self.runners[0].bot = bot
 
     @property
     def as_dodger(self) -> bool:
         return self.role is Role.DODGER
 
-    def _emit(self, kind: str, text: str) -> None:
-        self._events.append(Event(kind, text))
+    def _pid(self, pid: str | None) -> str:
+        found = pid if pid is not None else self.default_player
+        if found is None or found not in self.humans:
+            msg = f"no such player: {pid!r}"
+            raise KeyError(msg)
+        return found
+
+    # --- messages -------------------------------------------------------------------------
+
+    def _emit(self, kind: str, text: str, to: list[str] | None = None) -> None:
+        """A message for some human players (everyone when ``to`` is ``None``)."""
+        for pid in self.humans if to is None else to:
+            self.humans[pid].events.append(Event(kind, text))
+
+    def _announce(self, kind: str, to_runners: str, to_hunters: str) -> None:
+        for human in self.humans.values():
+            text = to_runners if human.role is Role.DODGER else to_hunters
+            human.events.append(Event(kind, text))
 
     def _tell(self, who: Traveller, kind: str, text: str) -> None:
-        """An event about ``who``, shown only when it is the human player."""
-        if who is self.player:
-            self._emit(kind, text)
+        """An event about ``who``, shown only to that human (bots are told nothing)."""
+        for human in self.humans.values():
+            if human.traveller is who:
+                human.events.append(Event(kind, text))
 
-    def drain_events(self) -> list[Event]:
-        events, self._events = self._events, []
+    def drain_events(self, pid: str | None = None) -> list[Event]:
+        human = self.humans[self._pid(pid)]
+        events, human.events = human.events, []
         return events
 
-    # --- input (the human player) ----------------------------------------------------------
+    # --- input (human players) -------------------------------------------------------------
+
+    def set_keys(self, keys: Keys, pid: str | None = None) -> None:
+        self.humans[self._pid(pid)].keys = keys
+
+    def _active(self, pid: str | None) -> Human | None:
+        """The human, if the round is on and they are still in it (not caught)."""
+        human = self.humans[self._pid(pid)]
+        if self.status is not Status.RUNNING:
+            return None
+        if human.runner is not None and human.runner.caught:
+            return None
+        return human
 
     def stop_of(self, who: Traveller) -> int | None:
-        if who.ride is not None or who.held_until is not None:
+        if who.ride is not None or who.held_until is not None or who.brewing_until is not None:
             return None
-        return self.world.nearest_node(who.pos, self.cfg.board_radius_m)
+        return self.world.nearest_stop(who.pos, self.cfg.board_radius_m)
 
-    def current_stop(self) -> int | None:
-        return self.stop_of(self.player)
+    def current_stop(self, pid: str | None = None) -> int | None:
+        return self.stop_of(self.humans[self._pid(pid)].traveller)
 
-    def departures(self) -> list[Departure]:
-        stop = self.current_stop()
+    def departures(self, pid: str | None = None) -> list[Departure]:
+        stop = self.current_stop(pid)
         if stop is None:
             return []
         return self.world.departures(stop, self.t, DEPARTURE_HORIZON_S, DEPARTURE_LIMIT)
 
-    def buy_ticket(self) -> None:
+    def cafe_at(self, who: Traveller) -> int | None:
+        """The café ``who`` is standing at (on foot), if any."""
+        if who.ride is not None or who.held_until is not None:
+            return None
+        best, best_d = None, self.cfg.cafe_radius_m
+        for i, cafe in enumerate(self.world.cafes):
+            d = distance(who.pos, cafe.pos)
+            if d <= best_d:
+                best, best_d = i, d
+        return best
+
+    def buy_coffee(self, pid: str | None = None) -> None:
+        """Buy a coffee at the café: stand still while it is made, then run fast for a while."""
+        human, cfg = self._active(pid), self.cfg
+        if human is None or human.traveller.brewing_until is not None:
+            return
+        p, to = human.traveller, [self._pid(pid)]
+        if not p.pays_fares:
+            self._emit("info", "Bounty Hunters are on duty: no coffee breaks.", to)
+            return
+        cafe = self.cafe_at(p)
+        if cafe is None:
+            self._emit("info", "Find a café first (☕ on the map).", to)
+        elif p.money < cfg.coffee_price_ft:
+            self._emit("info", f"Not enough money: a coffee costs {cfg.coffee_price_ft} Ft.", to)
+        else:
+            p.money -= cfg.coffee_price_ft
+            p.waiting_for = None
+            p.brewing_until = self.t + cfg.coffee_brew_s
+            self._emit(
+                "coffee",
+                f"One coffee at {self.world.cafes[cafe].name} ({cfg.coffee_price_ft} Ft), "
+                "coming up…",
+                to,
+            )
+
+    def buy_ticket(self, pid: str | None = None) -> None:
         """Buy a single ticket at the stop's machine."""
-        if self.status is not Status.RUNNING:
+        human = self._active(pid)
+        if human is None:
             return
-        if not self.player.pays_fares:
-            self._emit("info", "Bounty Hunters ride for free.")
+        if not human.traveller.pays_fares:
+            self._emit("info", "Bounty Hunters ride for free.", [self._pid(pid)])
             return
-        self.buy_ticket_for(self.player)
+        self.buy_ticket_for(human.traveller)
 
     def buy_ticket_for(self, who: Traveller) -> bool:
         price = self.cfg.ticket_price_ft
@@ -221,40 +407,51 @@ class LiveGame:
             return True
         return False
 
-    def use(self) -> None:
-        """The action key: get off, stop waiting, or wait for the next departure."""
-        if self.status is not Status.RUNNING:
+    def use(self, pid: str | None = None) -> None:
+        """The action key: get off (or stay on), stop waiting, or wait for the next one."""
+        human = self._active(pid)
+        if human is None:
             return
-        p = self.player
-        if p.held_until is not None:
+        p, to = human.traveller, [self._pid(pid)]
+        if p.held_until is not None or p.brewing_until is not None:
             return
         if p.ride is not None:
             if p.ride.fined:
-                self._emit("info", "The inspectors are taking you off at the next stop.")
+                self._emit("info", "The inspectors are taking you off at the next stop.", to)
                 return
-            self._request_alight(p.ride)
+            if p.ride.alight_pos is not None:  # changed your mind: stay on
+                p.ride.alight_pos = None
+                self._emit("info", "You stay on.", to)
+                return
+            self._request_alight(p.ride, to)
         elif p.waiting_for is not None:
             p.waiting_for = None
-            self._emit("info", "You stopped waiting.")
+            self._emit("info", "You stopped waiting.", to)
         else:
-            self.wait_for(0)
+            self.wait_for(0, pid)
 
-    def wait_for(self, index: int) -> None:
+    def wait_for(self, index: int, pid: str | None = None) -> None:
         """Wait at the current stop for departure ``index`` of the listed departures."""
-        p = self.player
-        if self.status is not Status.RUNNING or p.ride is not None or p.held_until is not None:
+        human = self._active(pid)
+        if human is None:
             return
-        departures = self.departures()
-        if self.current_stop() is None:
-            self._emit("info", "Walk to a stop first.")
+        p, to = human.traveller, [self._pid(pid)]
+        if p.ride is not None or p.held_until is not None:
+            return
+        if p.brewing_until is not None:
+            self._emit("info", "Your coffee is nearly ready…", to)
+            return
+        departures = self.departures(pid)
+        if self.current_stop(pid) is None:
+            self._emit("info", "Walk to a stop first.", to)
         elif index >= len(departures):
-            self._emit("info", "No such departure.")
+            self._emit("info", "No such departure.", to)
         else:
             dep = departures[index]
             p.waiting_for = dep
-            self._emit("info", f"Waiting for {dep.route} towards {dep.headsign}.")
+            self._emit("info", f"Waiting for {dep.route} towards {dep.headsign}.", to)
 
-    def _request_alight(self, ride: Ride) -> None:
+    def _request_alight(self, ride: Ride, to: list[str]) -> None:
         state = self.world.trip_state(ride.trip, self.t)
         if state is None:
             return
@@ -263,7 +460,20 @@ class LiveGame:
         here = state.stop if self.t <= dep[state.stop] else state.stop + 1
         ride.alight_pos = min(max(here, ride.board_pos + 1), last)
         name = self.world.tt.node_name[self.world.stops(ride.trip)[ride.alight_pos]]
-        self._emit("info", f"Getting off at {name}.")
+        self._emit("info", f"Getting off at {name}.", to)
+
+    def make_bot(self, pid: str) -> None:
+        """A human left: a bot plays their Dodger; a Bounty Hunter just stops."""
+        human = self.humans.get(pid)
+        if human is None:
+            return
+        human.keys = Keys()
+        runner = human.runner
+        if runner is not None and runner.bot is None:
+            runner.player = None
+            runner.bot = BotDodger(
+                self.world, self.cfg, random.Random(f"{self.seed}:bot{runner.index}"), runner.index
+            )
 
     # --- simulation ------------------------------------------------------------------------
 
@@ -274,29 +484,46 @@ class LiveGame:
             self._advance(h)
             dt -= h
 
+    def in_play(self) -> list[Runner]:
+        return [r for r in self.runners if not r.caught]
+
     def _advance(self, h: float) -> None:
         self.t = min(self.t + h, self.cfg.end_seconds)
-        d = self.dodger
-        if self.as_dodger:
-            self._move(d, h, self.keys.direction(), None)
-        else:
-            target = self.dodger_bot.control(self) if self.dodger_bot is not None else None
-            self._move(d, h, None, target)
-            self._move(self.player, h, self.keys.direction(), None)
+        for runner in self.in_play():
+            if runner.bot is not None:
+                target, direction = runner.bot.control(self)
+                self._move(runner.traveller, h, direction, target)
+            elif runner.player is not None:
+                keys = self.humans[runner.player].keys
+                self._move(runner.traveller, h, keys.direction(), None)
+        for human in self.humans.values():
+            if human.role is Role.HUNTER:
+                self._move(human.traveller, h, human.keys.direction(), None)
         if self.status is not Status.RUNNING:
             return
-        self.hunters.advance(self.t, h, d.pos, d.ride is None)
+        self.hunters.advance(
+            self.t,
+            h,
+            [(r.traveller.pos, r.traveller.ride is None) for r in self.in_play()],
+        )
         if self.t >= self.next_ping:
             self._ping()
         self._check_catch()
         if self.status is Status.RUNNING and self.t >= self.cfg.end_seconds:
             self.status = Status.ESCAPED
-            self._emit(
-                "end",
-                "You made it! The Bounty Hunters gave up."
-                if self.as_dodger
-                else "Time's up: the Dodger got away.",
-            )
+            escaped = len(self.in_play())
+            if len(self.runners) == 1:
+                self._announce(
+                    "end",
+                    "You made it! The Bounty Hunters gave up.",
+                    "Time's up: the Dodger got away.",
+                )
+            else:
+                self._announce(
+                    "end",
+                    f"Time's up! {escaped} of {len(self.runners)} Dodgers got away.",
+                    f"Time's up: {escaped} of {len(self.runners)} Dodgers got away.",
+                )
 
     def _move(
         self, who: Traveller, h: float, direction: Point | None, target: Point | None
@@ -304,28 +531,44 @@ class LiveGame:
         """Advance ``who`` by ``h`` seconds: walking along ``direction`` (a unit vector) or
         straight towards ``target``, or waiting, boarding, riding and paying fines."""
         world = self.world
+        if who.boosted_until is not None and self.t >= who.boosted_until:
+            who.boosted_until = None
+            self._tell(who, "coffee", "The coffee wore off.")
         if who.held_until is not None:
             if self.t >= who.held_until:
                 self._pay_fine(who)
+            return
+        if who.brewing_until is not None:
+            if self.t >= who.brewing_until:
+                who.brewing_until = None
+                who.boosted_until = self.t + self.cfg.coffee_boost_s
+                who.coffees += 1
+                self._tell(who, "coffee", "☕ Coffee! You're running fast for a while.")
             return
         if who.ride is not None:
             self._ride(who, who.ride)
             return
         if who.waiting_for is not None:
             dep = who.waiting_for
-            if distance(who.pos, world.node_xy[dep.node]) > self.cfg.board_radius_m:
+            if world.stop_distance(who.pos, dep.node) > self.cfg.board_radius_m:
                 who.waiting_for = None
                 self._tell(who, "info", "You left the stop.")
             elif self.t >= dep.time:
                 who.waiting_for = None
                 who.ride = Ride(dep.trip, dep.pos)
-                who.pos = world.node_xy[dep.node]
+                who.pos = world.stop_point(dep.pattern, dep.pos)
+                who.street = None
+                who.follower.reset()
                 who.rides += 1
                 self._tell(who, "board", f"You boarded {dep.route} towards {dep.headsign}.")
                 if who.pays_fares:
                     self._board(who, who.ride, dep)
                 return
-        step = self.cfg.walk_speed_mps * h
+        boosted = who.boosted_until is not None
+        step = (self.cfg.coffee_speed_mps if boosted else self.cfg.walk_speed_mps) * h
+        if world.streets is not None:
+            self._walk_streets(who, step, direction, target)
+            return
         if target is not None:
             gap = distance(who.pos, target)
             if gap < 1e-9:
@@ -342,6 +585,60 @@ class LiveGame:
                 who.pos = candidate
                 return
 
+    def _walk_streets(
+        self, who: Traveller, step: float, direction: Point | None, target: Point | None
+    ) -> None:
+        streets = self.world.streets
+        assert streets is not None
+        old = who.pos
+        if target is not None:
+            who.pos = streets_pos = self.world.walk_towards(who.follower, who.pos, target, step)
+            who.street = None
+        else:
+            if direction is None or direction == (0.0, 0.0):
+                return
+            if self._walk_open_ground(who, step, direction):
+                who.walked_m += distance(old, who.pos)
+                return
+            here = who.street
+            if here is None or distance(streets.point(here), who.pos) > 1e-6:
+                here = streets.snap(who.pos)  # e.g. after getting off: step onto the street
+            who.street = streets.move(here, direction, step)
+            who.pos = streets_pos = streets.point(who.street)
+        who.walked_m += distance(old, streets_pos)
+
+    def _walk_open_ground(self, who: Traveller, step: float, direction: Point) -> bool:
+        """Walk freely across parks and squares. Returns ``False`` to walk on the streets
+        instead: when the way ahead is not open ground and a street is close by."""
+        parks, streets, world = self.world.parks, self.world.streets, self.world
+        if parks is None or streets is None:
+            return False
+        x, y = who.pos
+        dx, dy = direction
+
+        def open_ground(p: Point) -> bool:
+            return parks.contains(p) and world.contains(p)
+
+        straight = (x + dx * step, y + dy * step)
+        # Parks usually start a few metres off the street: head for one just ahead too.
+        probe = (x + dx * PARK_ENTER_M, y + dy * PARK_ENTER_M)
+        if open_ground(straight) or (open_ground(probe) and world.contains(straight)):
+            who.pos, who.street = straight, None
+            return True
+        if who.street is not None or not parks.contains(who.pos):
+            return False  # on a street: keep to the streets
+        # In a park, facing its edge: step onto a street close by, or slide along the edge.
+        if distance(streets.point(streets.snap(who.pos)), who.pos) <= PARK_EXIT_M:
+            return False
+        for slide in ((x + dx * step, y), (x, y + dy * step)):
+            if slide != who.pos and open_ground(slide):
+                who.pos = slide
+                return True
+        return True  # stuck at the edge, with no street nearby
+
+    def _runner_of(self, who: Traveller) -> Runner | None:
+        return next((r for r in self.runners if r.traveller is who), None)
+
     def _board(self, d: Traveller, ride: Ride, dep: Departure) -> None:
         if d.tickets > 0:
             d.tickets -= 1
@@ -351,11 +648,13 @@ class LiveGame:
         if ride.ticket:
             self._tell(d, "inspection", "Ticket inspection! Your ticket is valid. Phew.")
             return
-        if d.money < self.cfg.fine_ft:
-            self._caught(
-                f"Ticket inspection! You can't pay the {self.cfg.fine_ft} Ft fine."
-                if self.as_dodger
-                else "Ticket inspectors caught the Dodger, who couldn't pay the fine."
+        runner = self._runner_of(d)
+        if d.money < self.cfg.fine_ft and runner is not None:
+            self._catch(
+                runner,
+                to_runner=f"Ticket inspection! You can't pay the {self.cfg.fine_ft} Ft fine.",
+                to_others=f"Ticket inspectors caught {self._called(runner)}, who couldn't pay "
+                "the fine.",
             )
             return
         ride.fined = True
@@ -378,13 +677,15 @@ class LiveGame:
             target = last
         if target is not None and self.t >= arr[target]:
             node = world.stops(ride.trip)[target]
-            who.pos, who.ride = world.node_xy[node], None
+            who.pos = world.stop_point(world.trip_pattern[ride.trip], target)
+            who.ride = None
             name = world.tt.node_name[node]
             if ride.fined:
                 who.held_until = self.t + self.cfg.fine_hold_s
                 self._tell(who, "fine", f"Held at {name} while the fine is written.")
-                if self.cfg.fine_alerts_hunters:
-                    self._report(node, "The inspectors reported you", "Inspectors fined the Dodger")
+                runner = self._runner_of(who)
+                if self.cfg.fine_alerts_hunters and runner is not None:
+                    self._report(runner, node, "The inspectors reported", "Inspectors fined")
             else:
                 self._tell(who, "alight", f"You got off at {name}.")
             return
@@ -392,79 +693,133 @@ class LiveGame:
         if state is not None:
             who.pos = state.pos
 
+    def _called(self, runner: Runner) -> str:
+        """How others refer to a Dodger."""
+        return "the Dodger" if len(self.runners) == 1 else runner.name
+
     def _ping(self) -> None:
-        node = self.world.nearest_node(self.dodger.pos)
-        assert node is not None
         self.next_ping += self.cfg.ping_every_s
-        self._report(node, "Spotted", "The Dodger was spotted")
+        for runner in self.in_play():
+            node = self.world.nearest_node(runner.traveller.pos)
+            assert node is not None
+            self._report(runner, node, "Spotted", "Spotted", tell_hunters=False)
+        self.hunters.on_pings(self.latest_pings())
+        names = ", ".join(self._called(r) for r in self.in_play())
+        self._announce(
+            "ping", "The Bounty Hunters got a report on your team.", f"New report: {names}."
+        )
 
-    def _report(self, node: int, as_dodger: str, as_hunter: str) -> None:
-        """Tell the Bounty Hunters where the Dodger is."""
-        ping = Ping(int(self.t), self.dodger.pos, node)
-        self.pings.append(ping)
-        self.hunters.on_ping(ping)
-        text = as_dodger if self.as_dodger else as_hunter
-        self._emit("ping", f"{text} near {self.world.tt.node_name[node]}!")
+    def _report(
+        self, runner: Runner, node: int, as_runner: str, as_hunter: str, tell_hunters: bool = True
+    ) -> None:
+        """Tell the Bounty Hunters where ``runner`` is."""
+        self.pings.append(Ping(int(self.t), runner.traveller.pos, node, runner.index))
+        place = self.world.tt.node_name[node]
+        if runner.player is not None:
+            self._emit("ping", f"{as_runner} you near {place}!", [runner.player])
+        hunters = [pid for pid, h in self.humans.items() if h.role is Role.HUNTER]
+        self._emit("ping", f"{as_hunter} {self._called(runner)} near {place}!", hunters)
+        if tell_hunters:
+            self.hunters.on_pings(self.latest_pings())
 
-    def hunter_states(self) -> list[tuple[AgentState, bool]]:
-        """Every Bounty Hunter's state, and whether it is the human player."""
-        states = [(s, False) for s in self.hunters.states()]
-        if not self.as_dodger:
-            p = self.player
-            trip = p.ride.trip if p.ride else None
-            states.insert(0, (AgentState(p.pos, trip, None), True))
+    def latest_pings(self) -> list[Ping]:
+        """The latest report of each Dodger still in play."""
+        latest: dict[int, Ping] = {}
+        for ping in self.pings:
+            latest[ping.runner] = ping
+        return [latest[r.index] for r in self.in_play() if r.index in latest]
+
+    def hunter_states(self) -> list[tuple[AgentState, str | None]]:
+        """Every Bounty Hunter's state, and the human player's id (``None`` for bots)."""
+        states: list[tuple[AgentState, str | None]] = [(s, None) for s in self.hunters.states()]
+        for pid, human in self.humans.items():
+            if human.role is Role.HUNTER:
+                p = human.traveller
+                trip = p.ride.trip if p.ride else None
+                states.append((AgentState(p.pos, trip, None), pid))
         return states
 
-    def dodger_visible(self) -> bool:
-        """The Bounty Hunters can see the Dodger (not riding, and one of them is close)."""
-        d = self.dodger
-        if d.ride is not None:
+    def visible(self, runner: Runner) -> bool:
+        """The Bounty Hunters can see this Dodger (not riding, and one of them is close)."""
+        d = runner.traveller
+        if runner.caught or d.ride is not None:
             return False
         return any(
             distance(s.pos, d.pos) <= self.cfg.sight_radius_m for s, _ in self.hunter_states()
         )
 
-    def _check_catch(self) -> None:
-        d = self.dodger
-        trip = d.ride.trip if d.ride else None
-        exposed = True
-        if trip is not None:
-            state = self.world.trip_state(trip, self.t)
-            exposed = state is not None and state.at_stop
-        for agent, human in self.hunter_states():
-            same_trip = trip is not None and agent.trip == trip
-            on_foot_close = (
-                agent.trip is None
-                and exposed
-                and distance(agent.pos, d.pos) <= self.cfg.catch_radius_m
-            )
-            if not (same_trip or on_foot_close):
-                continue
-            where = f" on the {self.world.route(trip)}" if same_trip and trip is not None else ""
-            if self.as_dodger:
-                text = (
-                    f"A Bounty Hunter was riding the {self.world.route(trip)} with you."
-                    if same_trip and trip is not None
-                    else "A Bounty Hunter caught you."
-                )
-            elif human:
-                text = f"You caught the Dodger{where}!"
-            else:
-                text = f"Your teammate caught the Dodger{where}!"
-            self._caught(text)
-            return
+    def dodger_visible(self) -> bool:
+        return any(self.visible(r) for r in self.runners)
 
-    def _caught(self, text: str) -> None:
-        self.status = Status.CAUGHT
-        self.caught_by = text
-        self._emit("end", text)
+    def _check_catch(self) -> None:
+        """A Bounty Hunter catches a Dodger on the same trip, or when both are on foot."""
+        for runner in self.in_play():
+            d = runner.traveller
+            trip = d.ride.trip if d.ride else None
+            for agent, pid in self.hunter_states():
+                same_trip = trip is not None and agent.trip == trip
+                on_foot_close = (
+                    trip is None
+                    and agent.trip is None
+                    and distance(agent.pos, d.pos) <= self.cfg.catch_radius_m
+                )
+                if not (same_trip or on_foot_close):
+                    continue
+                route = self.world.route(trip) if same_trip and trip is not None else None
+                where = f" on the {route}" if route else ""
+                self._catch(
+                    runner,
+                    to_runner=(
+                        f"A Bounty Hunter was riding the {route} with you."
+                        if route
+                        else "A Bounty Hunter caught you."
+                    ),
+                    to_others=f"{'You' if pid else 'Your team'} caught {self._called(runner)}"
+                    f"{where}!",
+                    catcher=pid,
+                )
+                break
+
+    def _catch(
+        self, runner: Runner, to_runner: str, to_others: str, catcher: str | None = None
+    ) -> None:
+        runner.caught = True
+        runner.traveller.waiting_for = None
+        if runner.player is not None:
+            self._emit("end", to_runner, [runner.player])
+        for pid, human in self.humans.items():
+            if pid == runner.player:
+                continue
+            if human.role is Role.DODGER:
+                self._emit("ping", f"{runner.name} was caught!", [pid])
+            elif catcher is None or pid == catcher:
+                self._emit("end", to_others, [pid])
+            else:
+                self._emit("end", f"Your team caught {self._called(runner)}!", [pid])
+        if len(self.runners) == 1 or runner.player == self.default_player:
+            self.caught_by = to_runner if self.as_dodger else to_others
+        if not self.in_play():
+            self.status = Status.CAUGHT
+            if self.caught_by is None:
+                self.caught_by = "Every Dodger was caught."
+
+    def result(self) -> tuple[int, int]:
+        """Points so far: (Dodgers still free, Dodgers caught). Final once the round is over."""
+        caught = sum(r.caught for r in self.runners)
+        return len(self.runners) - caught, caught
+
+    def won(self, pid: str | None = None) -> bool | None:
+        """Whether this human's side scored more this round (``None`` while running or tied)."""
+        if self.status is Status.RUNNING:
+            return None
+        free, caught = self.result()
+        if free == caught:
+            return None
+        return (free > caught) == (self.humans[self._pid(pid)].role is Role.DODGER)
 
     @property
     def player_won(self) -> bool | None:
-        """``None`` while running; otherwise whether the human's side won the round."""
-        if self.status is Status.RUNNING:
-            return None
-        return (self.status is Status.ESCAPED) == self.as_dodger
+        return self.won()
 
     # --- client view -----------------------------------------------------------------------
 
@@ -472,9 +827,14 @@ class LiveGame:
         lat, lon = self.world.proj.to_latlon(p)
         return [round(lat, 6), round(lon, 6)]
 
-    def snapshot(self) -> dict[str, Any]:
-        world, p, d, t = self.world, self.player, self.dodger, self.t
+    def snapshot(self, pid: str | None = None) -> dict[str, Any]:
+        """What one human player sees."""
+        pid = self._pid(pid)
+        human = self.humans[pid]
+        world, p, t = self.world, human.traveller, self.t
         names = world.tt.node_name
+        as_runner = human.role is Role.DODGER
+        me = human.runner
         ride = None
         if p.ride is not None:
             r = p.ride
@@ -491,7 +851,8 @@ class LiveGame:
                 "ticket": r.ticket,
                 "fined": r.fined,
             }
-        stop = self.current_stop()
+        out = me is not None and me.caught
+        stop = None if out else self.current_stop(pid)
         waiting = p.waiting_for
         stop_view = None
         if stop is not None:
@@ -505,30 +866,81 @@ class LiveGame:
                         "in_s": round(dep.time - t),
                         "waiting": waiting is not None and waiting.trip == dep.trip,
                     }
-                    for dep in self.departures()
+                    for dep in self.departures(pid)
                 ],
             }
-        if p.ride:
+        if out:
+            state_name = "caught"
+        elif p.ride:
             state_name = "ride"
         elif p.held_until is not None:
             state_name = "held"
         else:
             state_name = "wait" if waiting else "walk"
-        last_ping = self.pings[-1] if self.pings else None
-        visible = self.dodger_visible()
         over = self.status is not Status.RUNNING
+        hunter_states = self.hunter_states()
+        # Bounty Hunters: the bots, plus the human ones (as teammates or seen by the Dodgers).
+        hunters_view = [
+            {"pos": self._latlon(s.pos), "riding": s.trip is not None, "chasing": ag.chasing}
+            for s, ag in zip(self.hunters.states(), self.hunters.agents, strict=True)
+        ] + [
+            {
+                "pos": self._latlon(h.traveller.pos),
+                "riding": h.traveller.ride is not None,
+                "chasing": False,
+                "name": h.name,
+            }
+            for other, h in self.humans.items()
+            if h.role is Role.HUNTER and other != pid
+        ]
+        if as_runner:
+            dodgers_view = [
+                {
+                    "pos": self._latlon(r.traveller.pos),
+                    "held": r.traveller.held_until is not None,
+                    "caught": r.caught,
+                    "name": r.name,
+                    "riding": r.traveller.ride is not None,
+                }
+                for r in self.runners
+                if r is not me
+            ]
+        else:
+            dodgers_view = [
+                {
+                    "pos": self._latlon(r.traveller.pos),
+                    "held": r.traveller.held_until is not None,
+                    "caught": r.caught,
+                    "name": r.name,
+                    "riding": r.traveller.ride is not None,
+                }
+                for r in self.runners
+                if over or r.caught or self.visible(r)
+            ]
+        latest = self.latest_pings() if not as_runner else []
+        last_ping = max(latest, key=lambda g: g.time) if latest else None
+        d = me.traveller if me is not None else None
         return {
             "t": round(t, 1),
             "clock": format_hms(int(t)),
             "remaining_s": round(self.cfg.end_seconds - t),
             "next_ping_s": round(self.next_ping - t),
             "status": self.status.value,
-            "role": self.role.value,
-            "won": self.player_won,
-            "message": self.caught_by,
-            "player": {"pos": self._latlon(p.pos), "state": state_name},
+            "role": human.role.value,
+            "won": self.won(pid),
+            "message": self.caught_by if pid == self.default_player else None,
+            "player": {"pos": self._latlon(p.pos), "state": state_name, "name": human.name},
             "wallet": {"money": p.money, "tickets": p.tickets} if p.pays_fares else None,
             "held_s": round(p.held_until - t) if p.held_until is not None else None,
+            "coffee": {
+                "cafe": (
+                    self.world.cafes[cafe_here].name
+                    if (cafe_here := self.cafe_at(p)) is not None and p.pays_fares and not out
+                    else None
+                ),
+                "brewing_s": round(p.brewing_until - t) if p.brewing_until is not None else None,
+                "boost_s": round(p.boosted_until - t) if p.boosted_until is not None else None,
+            },
             "waiting": (
                 {
                     "route": waiting.route,
@@ -540,17 +952,18 @@ class LiveGame:
             ),
             "ride": ride,
             "stop": stop_view,
-            "hunters": [
-                {"pos": self._latlon(s.pos), "riding": s.trip is not None, "chasing": ag.chasing}
-                for s, ag in zip(self.hunters.states(), self.hunters.agents, strict=True)
-            ],
-            "dodger": (
-                {"pos": self._latlon(d.pos), "held": d.held_until is not None}
-                if not self.as_dodger and (visible or over)
-                else None
-            ),
+            "hunters": hunters_view,
+            "dodgers": dodgers_view,
+            # The first one seen, for single-player views.
+            "dodger": next((v for v in dodgers_view if not as_runner), None),
             "vehicles": [
-                [s.trip, *self._latlon(s.pos), world.mode(s.trip).value, world.route(s.trip)]
+                [
+                    s.trip,
+                    *self._latlon(s.pos),
+                    world.mode(s.trip).value,
+                    world.route(s.trip),
+                    round(s.heading, 3),
+                ]
                 for s in world.active_trips(t)
             ],
             "ping": (
@@ -558,20 +971,32 @@ class LiveGame:
                 if last_ping
                 else None
             ),
+            "pings": [
+                {
+                    "pos": self._latlon(g.pos),
+                    "age_s": round(t - g.time),
+                    "name": self.runners[g.runner].name,
+                }
+                for g in latest
+            ],
             "nearest_hunter_m": (
-                round(min((distance(s.pos, d.pos) for s, _ in self.hunter_states()), default=0.0))
-                if self.as_dodger
+                round(min((distance(s.pos, d.pos) for s, _ in hunter_states), default=0.0))
+                if d is not None
                 else None
             ),
-            "seen": visible,
+            "seen": self.visible(me) if me is not None else self.dodger_visible(),
+            "runners": {
+                "total": len(self.runners),
+                "caught": sum(r.caught for r in self.runners),
+            },
             "stats": {
                 "walked_m": round(p.walked_m),
                 "rides": p.rides,
-                "tickets_bought": d.tickets_bought,
-                "fines": d.fines,
-                "dodger_money": d.money,
+                "tickets_bought": p.tickets_bought,
+                "fines": p.fines,
+                "money": p.money,
             },
-            "events": [{"kind": e.kind, "text": e.text} for e in self.drain_events()],
+            "events": [{"kind": e.kind, "text": e.text} for e in self.drain_events(pid)],
         }
 
 
@@ -607,4 +1032,10 @@ def world_view(world: World, cfg: LiveConfig) -> dict[str, Any]:
         "board_radius_m": cfg.board_radius_m,
         "ticket_price_ft": cfg.ticket_price_ft,
         "fine_ft": cfg.fine_ft,
+        "cafes": [
+            {"name": c.name, "pos": [round(v, 6) for v in world.proj.to_latlon(c.pos)]}
+            for c in world.cafes
+        ],
+        "coffee_price_ft": cfg.coffee_price_ft,
+        "coffee_boost_s": cfg.coffee_boost_s,
     }

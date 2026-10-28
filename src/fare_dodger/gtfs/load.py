@@ -86,17 +86,40 @@ def active_services_by_date(feed_dir: Path) -> dict[date, set[str]]:
     return {d: s for d, s in services.items() if s}
 
 
+def feed_validity(feed_dir: Path) -> tuple[date, date] | None:
+    """``feed_start_date`` and ``feed_end_date`` from ``feed_info.txt``, if both are given."""
+    if not _path(feed_dir, "feed_info").is_file():
+        return None
+    info = read_table(feed_dir, "feed_info", [], ["feed_start_date", "feed_end_date"])
+    if not info.height:
+        return None
+    start, end = info["feed_start_date"][0], info["feed_end_date"][0]
+    if not start or not end:
+        return None
+    return _parse_date(start), _parse_date(end)
+
+
 def pick_service_date(feed_dir: Path, preference: date | Literal["auto"] = "auto") -> date:
-    """Resolve the configured service date.
+    """Resolve the configured service date, inside the feed's validity when it states one.
 
     ``"auto"`` returns the Tuesday, Wednesday or Thursday with the most active trips (the
-    earliest such date on ties), which avoids holidays and atypical Mondays and Fridays.
+    earliest such date on ties), which avoids holidays and atypical Mondays and Fridays. A
+    fixed date must have service and lie inside the feed's validity.
     """
     services = active_services_by_date(feed_dir)
+    validity = feed_validity(feed_dir)
+    if validity is not None:
+        first, last = validity
+        services = {d: s for d, s in services.items() if first <= d <= last}
     if preference != "auto":
         if preference not in services:
+            window = (
+                f" (valid {validity[0].isoformat()} to {validity[1].isoformat()})"
+                if validity
+                else ""
+            )
             msg = (
-                f"no service on {preference.isoformat()} in this feed; set [network] "
+                f"no service on {preference.isoformat()} in this feed{window}; set [network] "
                 'service_date to a date the feed covers, or to "auto"'
             )
             raise ValueError(msg)

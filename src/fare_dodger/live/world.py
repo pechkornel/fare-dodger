@@ -4,6 +4,10 @@ Positions are metres on a local flat projection (x east, y north) around the net
 centre. Vehicles move between consecutive stops at constant speed, along the hop's GTFS shape
 when one is given (see :mod:`fare_dodger.live.shapes`) and in a straight line otherwise, and
 stand at a stop from its arrival to its departure time.
+
+Vehicles stop where their route passes the platform (the shape's point for the stop), not at
+the merged station's centre, which can be 150 m away: going through the centre made every
+line zig-zag at its stops. Travellers board and get off at those stop points.
 """
 
 from __future__ import annotations
@@ -12,12 +16,18 @@ import itertools
 import math
 from bisect import bisect_right
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fare_dodger.config import Area
 from fare_dodger.geo import metres_per_degree
-from fare_dodger.live.shapes import Hops
+from fare_dodger.live.shapes import Hops, smooth_path
+from fare_dodger.live.streets import RouteFollower, StreetGraph, along
 from fare_dodger.modes import Mode
 from fare_dodger.network.timetable import Timetable
+
+if TYPE_CHECKING:
+    from fare_dodger.live.cafes import Cafe
+    from fare_dodger.live.parks import Parks
 
 Point = tuple[float, float]
 
@@ -58,6 +68,8 @@ class TripState:
     stop: int
     #: Standing at a stop (or within a few seconds of one), so doors are open.
     at_stop: bool
+    #: Direction of travel (radians, counter-clockwise from east).
+    heading: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,22 +95,52 @@ class World:
         n = tt.n_nodes
         self.proj = Projection(sum(tt.node_lat) / n, sum(tt.node_lon) / n)
         self.node_xy = [self.proj.to_xy(tt.node_lat[i], tt.node_lon[i]) for i in range(n)]
+        #: Walkable streets (see :meth:`set_streets`); ``None`` means free walking.
+        self.streets: StreetGraph | None = None
+        #: Where each station meets the street (the station itself without streets).
+        self.stop_xy = list(self.node_xy)
+        #: Coffee shops (see :mod:`fare_dodger.live.cafes`).
+        self.cafes: list[Cafe] = []
+        #: Open ground walkable in any direction (see :mod:`fare_dodger.live.parks`).
+        self.parks: Parks | None = None
         self.trip_pattern = [0] * tt.n_trips
         for p in range(tt.n_patterns):
             for trip in range(tt.pat_trip_ptr[p], tt.pat_trip_ptr[p + 1]):
                 self.trip_pattern[trip] = p
         self._stops = [tt.pattern_stops(p) for p in range(tt.n_patterns)]
+        #: Per pattern, per stop: where its vehicles stand.
+        self._stop_points: list[list[Point]] = []
         #: Per pattern, per hop: the path from one stop to the next and its cumulative lengths.
         self._paths: list[list[tuple[list[Point], list[float]]]] = []
+        #: Per station: every point where a vehicle stops there.
+        self.platform_xy: list[list[Point]] = [[] for _ in range(n)]
         for p, stops in enumerate(self._stops):
+            shaped = [
+                smooth_path([self.proj.to_xy(lat, lon) for lat, lon in hops[p][i]])
+                if hops and hops[p][i]
+                else []
+                for i in range(len(stops) - 1)
+            ]
+            points = []
+            for i, node in enumerate(stops):
+                if i > 0 and shaped[i - 1]:
+                    points.append(shaped[i - 1][-1])  # where it arrives
+                elif i < len(shaped) and shaped[i]:
+                    points.append(shaped[i][0])
+                else:
+                    points.append(self.node_xy[node])
+                if points[-1] not in self.platform_xy[node]:
+                    self.platform_xy[node].append(points[-1])
             pattern_paths = []
             for i in range(len(stops) - 1):
-                inner = [self.proj.to_xy(lat, lon) for lat, lon in hops[p][i]] if hops else []
-                path = [self.node_xy[stops[i]], *inner, self.node_xy[stops[i + 1]]]
+                path = shaped[i] or [points[i + 1]]
+                if distance(points[i], path[0]) > 1e-6:
+                    path = [points[i], *path]  # leaves from where it arrived
                 cum = [0.0]
                 for a, b in itertools.pairwise(path):
                     cum.append(cum[-1] + distance(a, b))
                 pattern_paths.append((path, cum))
+            self._stop_points.append(points)
             self._paths.append(pattern_paths)
         self._times = [self._trip_times(trip) for trip in range(tt.n_trips)]
         #: Stations where at least one pattern continues (trips clipped at the area edge
@@ -119,6 +161,49 @@ class World:
 
     # --- geometry --------------------------------------------------------------------------
 
+    def set_streets(self, streets: StreetGraph | None) -> None:
+        self.streets = streets
+        self.stop_xy = (
+            [streets.point(streets.snap(p)) for p in self.node_xy]
+            if streets is not None
+            else list(self.node_xy)
+        )
+
+    def stop_distance(self, p: Point, node: int) -> float:
+        """How far ``p`` is from station ``node``: its centre, where it meets the street, or
+        where a vehicle stops there, whichever is closest."""
+        return min(
+            distance(p, self.node_xy[node]),
+            distance(p, self.stop_xy[node]),
+            *(distance(p, q) for q in self.platform_xy[node]),
+        )
+
+    def stop_point(self, pattern: int, pos: int) -> Point:
+        """Where vehicles of ``pattern`` stand at stop ``pos``."""
+        return self._stop_points[pattern][pos]
+
+    def nearest_stop(self, p: Point, max_dist: float) -> int | None:
+        best, best_d = None, max_dist
+        for node in range(len(self.node_xy)):
+            d = self.stop_distance(p, node)
+            if d <= best_d:
+                best, best_d = node, d
+        return best
+
+    def walk_towards(
+        self, follower: RouteFollower, pos: Point, target: Point, max_step: float
+    ) -> Point:
+        """Walk up to ``max_step`` metres towards ``target``: along the streets, if any."""
+        if self.streets is None:
+            return step_towards(pos, target, max_step)
+        return follower.step(self.streets, pos, target, max_step)
+
+    def walk_point(self, a: Point, b: Point, f: float) -> Point:
+        """A fraction ``f`` of the way on foot from ``a`` to ``b`` (along the streets, if any)."""
+        if self.streets is None:
+            return lerp(a, b, f)
+        return along(self.streets.station_path(a, b, (a, b)), f)
+
     def contains(self, p: Point) -> bool:
         return self.area.contains(*self.proj.to_latlon(p))
 
@@ -131,6 +216,16 @@ class World:
         j = min(max(bisect_right(cum, target) - 1, 0), len(path) - 2)
         span = cum[j + 1] - cum[j]
         return lerp(path[j], path[j + 1], (target - cum[j]) / span if span > 0 else 0.0)
+
+    def hop_heading(self, pattern: int, hop: int, f: float) -> float:
+        """Direction of travel a fraction ``f`` of the way along ``hop`` of ``pattern``."""
+        path, cum = self._paths[pattern][hop]
+        target = f * cum[-1]
+        j = min(max(bisect_right(cum, target) - 1, 0), len(path) - 2)
+        while j < len(path) - 2 and cum[j + 1] - cum[j] < 1e-6:
+            j += 1
+        (x0, y0), (x1, y1) = path[j], path[j + 1]
+        return math.atan2(y1 - y0, x1 - x0)
 
     def pattern_path(self, pattern: int) -> list[Point]:
         """The whole path of ``pattern``, stop to stop."""
@@ -167,15 +262,20 @@ class World:
         arr, dep = self._times[trip]
         if t < arr[0] or t > arr[-1]:
             return None
-        stops = self.stops(trip)
         i = bisect_right(arr, t) - 1
+        pattern = self.trip_pattern[trip]
         if t <= dep[i] or i == len(arr) - 1:
-            return TripState(trip, self.node_xy[stops[i]], i, at_stop=True)
+            # Standing: facing the way it will leave (or the way it came, at the last stop).
+            last = i == len(arr) - 1
+            heading = (
+                self.hop_heading(pattern, i - 1, 1.0) if last else self.hop_heading(pattern, i, 0.0)
+            )
+            return TripState(trip, self._stop_points[pattern][i], i, True, heading)
         f = (t - dep[i]) / (arr[i + 1] - dep[i])
-        pos = self.hop_point(self.trip_pattern[trip], i, f)
+        pos = self.hop_point(pattern, i, f)
         grace = self.AT_STOP_GRACE_S
         at_stop = t - dep[i] <= grace or arr[i + 1] - t <= grace
-        return TripState(trip, pos, i, at_stop)
+        return TripState(trip, pos, i, at_stop, self.hop_heading(pattern, i, f))
 
     def active_trips(self, t: float) -> list[TripState]:
         states = []

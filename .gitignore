@@ -24,3 +24,6 @@ results/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Deployment secrets
+.env

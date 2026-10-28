@@ -4,11 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Bliccelő · Fare Dodger</title>
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap">
+  <!-- Libraries and the font are served from vendor/ (see vendor/README.md). -->
+  <link rel="stylesheet" href="vendor/maplibre-gl/maplibre-gl.css">
+  <link rel="stylesheet" href="vendor/fredoka/fredoka.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,11 +14,6 @@
 
   <div id="hud" class="panel">
     <div class="logo">Bliccelő <span>fare dodger</span></div>
-    <div class="scoreboard">
-      <span class="team you">You <b id="score-you">0</b></span>
-      <span class="vs">:</span>
-      <span class="team bots"><b id="score-bots">0</b> Bots</span>
-    </div>
     <div class="round-row">
       <span id="round" class="muted"></span>
       <span id="role" class="chip role"></span>
@@ -33,6 +26,7 @@
     <div id="wallet" class="wallet">
       <span class="chip money">💰 <b id="money">0</b> Ft</span>
       <span class="chip tickets">🎫 <b id="tickets">0</b></span>
+      <span id="boost" class="chip boost" hidden>☕ <b id="boost-s"></b></span>
     </div>
     <div class="ping-row">
       <span id="radar-label">🤠 radar</span>
@@ -44,12 +38,35 @@
     <div id="stop" class="stop"></div>
   </div>
 
+  <!-- CS-style top bar: score either side of the round timer. -->
+  <div id="topbar" class="panel" hidden>
+    <span class="team you">You <b id="score-you">0</b></span>
+    <span class="timer"><b id="round-timer">0:00</b><small id="round-label"></small></span>
+    <span class="team bots"><b id="score-bots">0</b> <span id="them-name">Bots</span></span>
+  </div>
+
+  <canvas id="minimap" class="panel" width="220" height="220" hidden></canvas>
+  <div id="ping-arrow" hidden>
+    <span class="arrow"><i id="ping-pointer">➤</i></span><span id="ping-dist"></span>
+  </div>
+
+  <!-- Get on / get off switch: blue to ride, red to get off. Click it or press E. -->
+  <button id="ride-toggle" type="button" hidden>
+    <span class="track"><span class="knob"></span></span>
+    <span class="label"><b id="ride-title"></b><small id="ride-detail"></small></span>
+  </button>
+
+  <div id="countdown" hidden>
+    <div class="number" id="countdown-number">3</div>
+    <div class="what" id="countdown-what"></div>
+  </div>
+
   <div id="feed"></div>
   <div id="burst" hidden><span id="burst-text"></span></div>
 
   <div id="help" class="panel">
     <b>WASD</b> walk · <b>E</b> wait / get off · <b>1–6</b> pick a departure ·
-    <b>T</b> buy ticket · <b>+/−</b> or wheel zoom · <b>Enter</b> next round · <b>F</b> follow · <b>R</b> new match
+    <b>T</b> buy ticket · <b>C</b> coffee · <b>+/−</b> or wheel zoom · <b>Enter</b> next round · <b>F</b> follow · <b>Esc</b> menu
   </div>
 
   <button id="follow" class="panel" type="button" hidden>Follow me (F)</button>
@@ -62,14 +79,78 @@
       <p id="result-stats" class="muted"></p>
       <div id="history" class="history"></div>
       <button id="again" type="button">Next round (Enter)</button>
+      <button id="to-menu" class="secondary" type="button" hidden>Main menu</button>
     </div>
   </div>
 
-  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <div id="lobby" hidden>
+    <div class="panel card lobby-card">
+      <div class="lobby-code-label">Game code</div>
+      <div id="lobby-code" class="lobby-code"></div>
+      <div class="muted">Share it with your friends · <span id="lobby-size"></span></div>
+      <div class="lobby-teams">
+        <div class="lobby-team" id="lobby-team-0"></div>
+        <div class="lobby-team" id="lobby-team-1"></div>
+      </div>
+      <p class="muted lobby-note">Empty places are bots. The hunting side gets two extra bots
+        every round, and a random team runs first.</p>
+      <div class="lobby-buttons">
+        <button type="button" id="switch-team" class="secondary">Switch team</button>
+        <button type="button" id="start-game">Start the match</button>
+        <button type="button" id="leave-lobby" class="secondary">Leave</button>
+      </div>
+      <p id="lobby-wait" class="muted" hidden>Waiting for the host to start…</p>
+    </div>
+  </div>
+
+  <div id="menu">
+    <div class="panel card menu-card">
+      <div class="menu-logo">Bliccelő</div>
+      <div class="menu-sub">Fare Dodger · real Budapest timetables</div>
+      <label class="field">Your name
+        <input id="player-name" maxlength="16" placeholder="Player" autocomplete="nickname">
+      </label>
+      <div class="menu-buttons">
+        <button type="button" id="play-solo">🎮 Play solo against bots</button>
+        <div class="menu-row">
+          <span>Create a game</span>
+          <button type="button" class="size" data-size="1">1v1</button>
+          <button type="button" class="size" data-size="2">2v2</button>
+          <button type="button" class="size" data-size="3">3v3</button>
+        </div>
+        <div class="menu-row">
+          <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off"
+                 spellcheck="false">
+          <button type="button" id="join" class="hunter">Join game</button>
+        </div>
+      </div>
+      <p id="menu-error" class="danger" hidden></p>
+      <details class="how">
+        <summary>How to play</summary>
+        <ul>
+          <li>Two teams play rounds of about 4 minutes, each on a different district: one team
+            runs, the other hunts (with two extra bots), and a random team runs first. Empty
+            places are played by bots.</li>
+          <li>Every Dodger is a point: escaping scores for the runners, getting caught for the
+            hunters (a 2v2 round can end 1–1). First past half the points wins; sides switch at
+            halftime, and after a tie every round until one team leads by two.</li>
+          <li><b>Dodger:</b> survive the round. Jog the streets (freely across parks), ride real
+            trams, buses and metros, and stay out of the Bounty Hunters' reach. Buy a ticket
+            (<b>T</b>) or risk the inspectors; grab a coffee (<b>C</b>) at a ☕ to run fast.</li>
+          <li><b>Bounty Hunter:</b> catch the Dodger on foot or on the same vehicle. You only see
+            them up close; follow the reports on the minimap and the arrow at the screen edge.</li>
+          <li><b>WASD</b> move · <b>E</b> or the switch (bottom right) get on / get off / stay on
+            · <b>1–6</b> pick a departure · <b>+/−</b> zoom · <b>Esc</b> back here.</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+
+  <script src="vendor/maplibre-gl/maplibre-gl.js"></script>
   <script type="importmap">
     { "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
     } }
   </script>
   <script type="module" src="app.js"></script>

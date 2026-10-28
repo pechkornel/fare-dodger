@@ -13,7 +13,8 @@ import random
 from dataclasses import dataclass, field
 
 from fare_dodger.config import LiveConfig
-from fare_dodger.live.world import Point, World, distance, lerp, step_towards
+from fare_dodger.live.streets import RouteFollower
+from fare_dodger.live.world import Point, World, distance
 from fare_dodger.routing.journey import Journey, RideLeg
 from fare_dodger.routing.raptor import raptor, reachable
 
@@ -32,6 +33,8 @@ class Ping:
     time: int
     pos: Point
     node: int
+    #: Which Dodger was reported (index into the round's runners).
+    runner: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,21 +46,45 @@ class AgentState:
     node: int | None
 
 
+def leg_ends(world: World, journey: Journey) -> list[tuple[Point, Point]]:
+    """Where each leg of ``journey`` starts and ends: rides at their vehicles' stop points,
+    walks between the neighbouring rides (or station centres)."""
+    legs = journey.legs
+    rides: list[tuple[Point, Point] | None] = [
+        (
+            world.stop_point(leg.pattern, leg.board_pos),
+            world.stop_point(leg.pattern, leg.alight_pos),
+        )
+        if isinstance(leg, RideLeg)
+        else None
+        for leg in legs
+    ]
+    ends: list[tuple[Point, Point]] = []
+    for k, leg in enumerate(legs):
+        ride = rides[k]
+        if ride is not None:
+            ends.append(ride)
+            continue
+        start = ends[-1][1] if ends else world.node_xy[leg.from_node]
+        after = rides[k + 1] if k + 1 < len(legs) else None
+        ends.append((start, after[0] if after is not None else world.node_xy[leg.to_node]))
+    return ends
+
+
 def journey_state(world: World, journey: Journey, t: float) -> AgentState:
     """Where someone following ``journey`` is at time ``t``."""
-    for leg in journey.legs:
+    ends = leg_ends(world, journey)
+    for leg, (start, end) in zip(journey.legs, ends, strict=True):
         if t < leg.dep:
-            return AgentState(world.node_xy[leg.from_node], None, leg.from_node)
+            return AgentState(start, None, leg.from_node)
         if t <= leg.arr:
             if isinstance(leg, RideLeg):
                 state = world.trip_state(leg.trip, t)
-                pos = state.pos if state else world.node_xy[leg.to_node]
-                return AgentState(pos, leg.trip, None)
-            a, b = world.node_xy[leg.from_node], world.node_xy[leg.to_node]
+                return AgentState(state.pos if state else end, leg.trip, None)
             f = (t - leg.dep) / (leg.arr - leg.dep) if leg.arr > leg.dep else 1.0
-            return AgentState(lerp(a, b, f), None, None)
+            return AgentState(world.walk_point(start, end, f), None, None)
     dest = journey.destination
-    return AgentState(world.node_xy[dest], None, dest)
+    return AgentState(ends[-1][1] if ends else world.node_xy[dest], None, dest)
 
 
 @dataclass
@@ -73,6 +100,8 @@ class Agent:
     trip: int | None = field(default=None)
     #: Idle until this time (no journey found).
     idle_until: float = 0.0
+    #: Street route while chasing or walking back.
+    follower: RouteFollower = field(default_factory=RouteFollower)
 
 
 class BountyHunters:
@@ -83,6 +112,8 @@ class BountyHunters:
         self.cfg = cfg
         self.rng = rng
         self.last_ping: Ping | None = None
+        #: The latest report of each Dodger still in play.
+        self.last_pings: list[Ping] = []
         targets = self._spread(list(range(world.tt.n_nodes)), len(starts), seed_node=None)
         self.agents = [
             Agent(node, world.node_xy[node], target)
@@ -92,9 +123,23 @@ class BountyHunters:
     # --- knowledge -------------------------------------------------------------------------
 
     def on_ping(self, ping: Ping) -> None:
-        self.last_ping = ping
-        spread = reachable(self.world.tt, [ping.node], ping.time, PING_SPREAD_S).reached()
-        targets = self._spread(spread or [ping.node], len(self.agents), seed_node=ping.node)
+        self.on_pings([ping])
+
+    def on_pings(self, pings: list[Ping]) -> None:
+        """New reports (the latest of each Dodger still in play): share the team between
+        them, the freshest first, and spread each share over where that Dodger could be."""
+        if not pings:
+            return
+        pings = sorted(pings, key=lambda p: (-p.time, p.runner))
+        self.last_ping, self.last_pings = pings[0], pings
+        k, m = len(self.agents), len(pings)
+        targets: list[int] = []
+        for i, ping in enumerate(pings):
+            share = k // m + (1 if i < k % m else 0)
+            if share == 0:
+                continue
+            spread = reachable(self.world.tt, [ping.node], ping.time, PING_SPREAD_S).reached()
+            targets += self._spread(spread or [ping.node], share, seed_node=ping.node)
         origins = [self._planning_node(a) for a in self.agents]
         for agent, target in zip(self.agents, self._assign(origins, targets), strict=True):
             agent.target = target
@@ -138,25 +183,32 @@ class BountyHunters:
 
     # --- movement --------------------------------------------------------------------------
 
-    def advance(self, t: float, dt: float, dodger: Point, dodger_on_foot: bool) -> None:
+    def advance(self, t: float, dt: float, dodgers: list[tuple[Point, bool]]) -> None:
+        """Move every Bounty Hunter for ``dt`` seconds. ``dodgers`` are the Dodgers still in
+        play: position, and whether on foot (only those can be seen and chased)."""
         step = self.cfg.walk_speed_mps * dt
         for agent in self.agents:
             on_foot = agent.trip is None
-            if (
-                dodger_on_foot
-                and on_foot
-                and distance(agent.pos, dodger) <= self.cfg.sight_radius_m
-            ):
+            in_sight = [
+                pos
+                for pos, foot in dodgers
+                if foot and on_foot and distance(agent.pos, pos) <= self.cfg.sight_radius_m
+            ]
+            dodger = min(in_sight, key=lambda p: distance(agent.pos, p), default=None)
+            if dodger is not None:
+                if not agent.chasing:
+                    agent.follower.reset()
                 agent.chasing, agent.plan, agent.returning_to = True, None, None
-                agent.pos = step_towards(agent.pos, dodger, step)
+                agent.pos = self.world.walk_towards(agent.follower, agent.pos, dodger, step)
                 continue
             if agent.chasing:
                 agent.chasing = False
                 nearest = self.world.nearest_node(agent.pos)
                 agent.returning_to = nearest if nearest is not None else agent.node
+                agent.follower.reset()
             if agent.returning_to is not None:
                 home = self.world.node_xy[agent.returning_to]
-                agent.pos = step_towards(agent.pos, home, step)
+                agent.pos = self.world.walk_towards(agent.follower, agent.pos, home, step)
                 if agent.pos == home:
                     agent.node, agent.returning_to = agent.returning_to, None
                     agent.needs_replan = True
@@ -186,11 +238,12 @@ class BountyHunters:
     def _search_target(self, t: float) -> int:
         """A station the Dodger could be at now, given the last ping (any before one)."""
         tt = self.world.tt
-        if self.last_ping is None:
+        if not self.last_pings:
             return self.rng.randrange(tt.n_nodes)
-        horizon = int(t) - self.last_ping.time + SEARCH_LOOKAHEAD_S
-        nodes = reachable(tt, [self.last_ping.node], self.last_ping.time, horizon).reached()
-        return self.rng.choice(nodes) if nodes else self.last_ping.node
+        ping = self.rng.choice(self.last_pings)
+        horizon = int(t) - ping.time + SEARCH_LOOKAHEAD_S
+        nodes = reachable(tt, [ping.node], ping.time, horizon).reached()
+        return self.rng.choice(nodes) if nodes else ping.node
 
     def _plan(self, origin: int, target: int, t: float) -> Journey | None:
         if origin == target:

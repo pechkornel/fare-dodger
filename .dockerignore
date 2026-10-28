@@ -1,0 +1,19 @@
+# Only the project sources, lock file and configs go into the image.
+.git
+.github
+.claude
+.venv
+data
+results
+tests
+docs
+**/__pycache__
+**/*.py[cod]
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.hypothesis
+.env
+.env.*
+compose.yaml
+Dockerfile

@@ -178,7 +178,8 @@ function shade(hex, amount) {
   return "#" + new THREE.Color(hex).lerp(target, Math.abs(amount)).getHexString();
 }
 
-// One merged, vertex-coloured mesh per mode, plus the outline hull of its sections.
+// Per mode: one merged, vertex-coloured mesh and outline hull per rigid section, and one mesh
+// per joint (bellows or coupler), each centred on its own origin so it can turn on its own.
 const vehicleTemplates = new Map();
 function vehicleTemplate(mode) {
   if (vehicleTemplates.has(mode)) return vehicleTemplates.get(mode);
@@ -187,8 +188,9 @@ function vehicleTemplate(mode) {
   const { width: W, height: H, floor: z0, wheel } = spec;
   const gap = spec.couplers ? 1.1 : 0.7;
   const total = spec.sections.reduce((a, b) => a + b, 0) + gap * (spec.sections.length - 1);
-  const parts = [];
-  const hulls = [];
+  const sections = [];
+  const joints = [];
+  let parts = [];   // the bucket being filled: the current section's, or a joint's
   const add = (geo, c, x, y, z, rotY = 0, rotX = 0) => {
     parts.push(coloured(geo, c, x, y, z, rotY, rotX));
   };
@@ -209,8 +211,9 @@ function vehicleTemplate(mode) {
   spec.sections.forEach((L, i) => {
     const xc = front - L / 2;
     const body = coloured(rbox(L, W, H, 0.42, 3), color, xc, 0, z0 + H / 2);
-    parts.push(body);
-    hulls.push(body);
+    const section = { x: xc, length: L, parts: [body], hull: body };
+    sections.push(section);
+    parts = section.parts;
     add(rbox(L - 0.1, W + 0.04, 0.45, 0.12), shade(color, -0.3), xc, 0, z0 + 0.25);
     add(rbox(L - 0.3, W + 0.03, 0.12, 0.04), "#f8f9fa", xc, 0, z0 + H * 0.4);
     add(rbox(L * 0.94, W * 0.86, 0.2, 0.08), shade(color, 0.45), xc, 0, top + 0.08);
@@ -268,6 +271,9 @@ function vehicleTemplate(mode) {
     } else {
       // Bellows or a coupler to the next section.
       const jx = back - gap / 2;
+      const joint = { x: jx, parts: [] };
+      joints.push(joint);
+      parts = joint.parts;
       if (spec.couplers) {
         add(rbox(gap + 0.3, W * 0.6, H * 0.75, 0.1), "#343a40", jx, 0, z0 + H * 0.45);
         add(rbox(gap + 0.4, 0.4, 0.35, 0.08), "#212529", jx, 0, z0 + 0.25);
@@ -277,6 +283,7 @@ function vehicleTemplate(mode) {
           add(rbox(0.06, W * 0.92, H * 0.84, 0.02), "#5c636a", jx + dx, 0, z0 + H * 0.47);
         }
       }
+      parts = section.parts;
     }
     if (i === 0 && spec.roofBox) {
       add(rbox(2.6, 1.8, 0.42, 0.15), "#dee2e6", xc - 1.2, 0, top + 0.3);
@@ -300,24 +307,45 @@ function vehicleTemplate(mode) {
     }
     front = back - gap;
   });
+  const centred = (geos, x) => mergeGeometries(geos).translate(-x, 0, 0);
   const template = {
-    geo: mergeGeometries(parts),
-    hull: mergeGeometries(hulls),
+    sections: sections.map((sec) => ({
+      x: sec.x, length: sec.length,
+      geo: centred(sec.parts, sec.x), hull: sec.hull.clone().translate(-sec.x, 0, 0),
+    })),
+    joints: joints.map((j) => ({ x: j.x, geo: centred(j.parts, j.x) })),
     length: total, width: W, roof: top + 0.25,
   };
   vehicleTemplates.set(mode, template);
   return template;
 }
 
+// A vehicle: its sections and joints start in a straight line; ToyTown bends them along the
+// path the vehicle has driven (see ``articulate``).
 export function makeVehicle(mode) {
   const t = vehicleTemplate(mode);
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
-  shadow(body, t.length * 0.56, t.width * 0.8);
-  body.add(new THREE.Mesh(t.geo, VEHICLE_MAT));
-  body.add(new THREE.Mesh(t.hull, OUTLINE_VEHICLE));
-  return { root, body, roof: t.roof, length: t.length };
+  const group = (x) => {
+    const g = new THREE.Group();
+    g.rotation.order = "ZYX";   // heading outermost; roll and pitch about the section's axes
+    g.position.x = x;
+    body.add(g);
+    return g;
+  };
+  const sections = t.sections.map((sec) => {
+    const g = group(sec.x);
+    shadow(g, sec.length * 0.56, t.width * 0.8);
+    g.add(new THREE.Mesh(sec.geo, VEHICLE_MAT), new THREE.Mesh(sec.hull, OUTLINE_VEHICLE));
+    return { group: g, x: sec.x, length: sec.length, roll: 0, pitch: 0, heading: 0 };
+  });
+  const joints = t.joints.map((j) => {
+    const g = group(j.x);
+    g.add(new THREE.Mesh(j.geo, VEHICLE_MAT));
+    return { group: g, x: j.x };
+  });
+  return { root, body, roof: t.roof, length: t.length, sections, joints };
 }
 
 // --- people --------------------------------------------------------------------------------
@@ -431,6 +459,27 @@ export function makePerson(kind) {
   bubble.visible = false;
   root.add(bubble);
   return { root, body, legs, arms, bubble, kind };
+}
+
+// A rider is inside the vehicle: instead of the figure, a pin in their colour floats above
+// the roof (pointing down at the vehicle), so riders stay easy to spot.
+function makePin(color) {
+  const pin = new THREE.Group();
+  const cone = new THREE.ConeGeometry(0.55, 1.2, 16);
+  cone.rotateX(-Math.PI / 2);      // tip pointing down (-z)
+  const head = new THREE.SphereGeometry(0.62, 20, 14);
+  head.translate(0, 0, 0.75);
+  for (const [geo, z] of [[cone, 0], [head, 0]]) {
+    const outline = new THREE.Mesh(
+      geo,
+      new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide }),
+    );
+    outline.scale.setScalar(1.18);
+    outline.position.z = z;
+    pin.add(outline, new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color })));
+  }
+  pin.visible = false;
+  return pin;
 }
 
 function makeRing(color) {
@@ -640,6 +689,80 @@ function pointInRing(x, y, ring) {
 }
 
 // --- the layer -----------------------------------------------------------------------------
+
+// --- vehicle motion ------------------------------------------------------------------------
+
+//: Trail points are recorded this far apart (map metres).
+const TRAIL_STEP = 0.4;
+const SUSPENSION = 1 - Math.exp(-1 / 6);   // per-frame easing of roll and pitch at 60 fps
+
+function recordTrail(rec, keep) {
+  const trail = rec.trail;
+  if (!trail.length || trail[0].distanceTo(rec.pos) >= TRAIL_STEP) trail.unshift(rec.pos.clone());
+  let length = 0;
+  for (let i = 1; i < trail.length; i++) {
+    length += trail[i].distanceTo(trail[i - 1]);
+    if (length > keep) { trail.length = i + 1; break; }
+  }
+}
+
+// The point ``u`` model metres along the vehicle from its centre (forward positive). The
+// vehicle's nose is at its reported position, so every section lies on the path it has just
+// driven; beyond the recorded trail it continues straight back.
+function pointAlong(rec, u, k) {
+  const dir = new THREE.Vector3(Math.cos(rec.angle), Math.sin(rec.angle), 0);
+  let remaining = (rec.length / 2 - u) * k;
+  let prev = rec.pos;
+  for (const p of rec.trail) {
+    const seg = prev.distanceTo(p);
+    if (seg >= remaining && seg > 0) return prev.clone().lerp(p, remaining / seg);
+    remaining -= seg;
+    prev = p;
+  }
+  return prev.clone().addScaledVector(dir, -remaining);
+}
+
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+// Ease-out with a little overshoot, 0 -> 1 over x in [0, 1].
+function popIn(x) {
+  if (x >= 1) return 1;
+  const c = 1.7;
+  const u = Math.max(0, x) - 1;
+  return Math.max(0.001, 1 + (c + 1) * u * u * u + c * u * u);
+}
+
+// Bend the sections along the driven path (articulated buses and trams fold at their bellows,
+// metro cars at their couplers), and give each section a little suspension: it leans out of
+// curves, dips when braking, squats when pulling away and jiggles while moving.
+function articulate(rec, k, dt, t) {
+  recordTrail(rec, (rec.length + 4) * k);
+  const moving = Math.min(1, rec.speed / (4 * k));
+  const ease = 1 - (1 - SUSPENSION) ** (dt * 60);
+  rec.sections.forEach((sec, i) => {
+    const front = pointAlong(rec, sec.x + sec.length / 2, k);
+    const back = pointAlong(rec, sec.x - sec.length / 2, k);
+    const heading = Math.atan2(front.y - back.y, front.x - back.x);
+    const yawRate = dt > 0 ? wrap(heading - sec.heading) / dt : 0;
+    sec.heading = heading;
+    // Rolls out of the curve; the nose lifts when pulling away and dips when braking.
+    const roll = THREE.MathUtils.clamp(yawRate * moving * 0.12, -0.07, 0.07);
+    const pitch = THREE.MathUtils.clamp((-(rec.accel || 0) / k) * 0.004, -0.035, 0.035);
+    sec.roll += (roll - sec.roll) * ease;
+    sec.pitch += (pitch - sec.pitch) * ease;
+    const mid = front.add(back).multiplyScalar(0.5).sub(rec.pos).divideScalar(k);
+    const jiggle = Math.sin(t * 13 + i * 1.9) * 0.03 * moving;
+    sec.group.position.set(mid.x, mid.y, jiggle);
+    sec.group.rotation.set(sec.roll, sec.pitch, heading);
+  });
+  rec.joints.forEach((joint, i) => {
+    const p = pointAlong(rec, joint.x, k).sub(rec.pos).divideScalar(k);
+    const a = rec.sections[i].heading;
+    const b = rec.sections[i + 1].heading;
+    joint.group.position.set(p.x, p.y, 0);
+    joint.group.rotation.set(0, 0, a + wrap(b - a) / 2);
+  });
+}
 
 export class ToyTown {
   constructor(map) {
@@ -936,15 +1059,19 @@ export class ToyTown {
     if (!this.origin) return;
     this.focus = this.local(s.player.pos[0], s.player.pos[1]);
     const seen = new Set();
-    for (const [trip, lat, lon, mode] of s.vehicles) {
+    for (const [trip, lat, lon, mode, , heading] of s.vehicles) {
       seen.add(trip);
       let rec = this.vehicles.get(trip);
       if (!rec) {
-        rec = { ...makeVehicle(mode), heading: null };
+        // Born facing the way it drives and lying straight along its track (no trail yet),
+        // then popping in, instead of appearing sideways and swinging round.
+        rec = { ...makeVehicle(mode), heading, angle: heading, trail: [], age: 0 };
+        rec.root.scale.setScalar(0.001);
         this.vehicles.set(trip, rec);
         this.actors.add(rec.root);
       }
       this.retarget(rec, this.local(lat, lon));
+      rec.heading = heading;   // the timetable knows which way it is going
       rec.mine = s.ride && s.ride.trip === trip;
     }
     for (const [trip, rec] of this.vehicles) {
@@ -959,17 +1086,25 @@ export class ToyTown {
       key: `hunter${i}`, kind: role === "hunter" ? "team" : "hunter", pos: h.pos,
       state: h.riding ? "ride" : "walk", alert: h.chasing,
     }));
-    if (s.dodger) {
-      people.push({ key: "dodger", kind: "wanted", pos: s.dodger.pos,
-        state: s.dodger.held ? "held" : "walk", alert: true });
-    }
+    // Other Dodgers: teammates when you run, the ones in sight when you hunt. The caught
+    // are out of the round.
+    (s.dodgers || []).forEach((d, i) => {
+      if (d.caught) return;
+      people.push({
+        key: `dodger${i}`, kind: role === "hunter" ? "wanted" : "dodger", pos: d.pos,
+        state: d.riding ? "ride" : d.held ? "held" : "walk", alert: role === "hunter",
+      });
+    });
     const keys = new Set();
     for (const p of people) {
       keys.add(p.key);
       let rec = this.people.get(p.key);
       if (rec && rec.kind !== p.kind) { this.actors.remove(rec.root); rec = null; }
       if (!rec) {
-        rec = { ...makePerson(p.kind), heading: null };
+        rec = { ...makePerson(p.kind), heading: null, angle: 0 };
+        rec.pin = makePin(ROLE_COLORS[p.kind]);
+        if (p.player) rec.pin.scale.setScalar(1.3);
+        rec.root.add(rec.pin);
         if (p.player) {
           rec.ring = makeRing(ROLE_COLORS[p.kind]);
           rec.root.add(rec.ring);
@@ -990,6 +1125,7 @@ export class ToyTown {
   retarget(rec, target) {
     if (!rec.target || rec.target.distanceTo(target) > 400) {
       rec.pos = target.clone();          // new, or teleported: no sliding across the map
+      if (rec.trail) rec.trail.length = 0;
     } else {
       const dx = target.x - rec.target.x, dy = target.y - rec.target.y;
       if (dx * dx + dy * dy > 0.04) rec.heading = Math.atan2(dy, dx);
@@ -1009,26 +1145,38 @@ export class ToyTown {
     const step = (rec) => {
       const before = rec.pos.clone();
       rec.pos.lerp(rec.target, follow);
-      rec.speed = before.distanceTo(rec.pos) / Math.max(dt, 1e-3);
+      const speed = before.distanceTo(rec.pos) / Math.max(dt, 1e-3);
+      rec.accel = (speed - (rec.speed || 0)) / Math.max(dt, 1e-3);
+      rec.speed = speed;
       if (rec.heading !== null) {
-        let d = rec.heading - rec.body.rotation.z;
+        let d = rec.heading - rec.angle;
         d = Math.atan2(Math.sin(d), Math.cos(d));
-        rec.body.rotation.z += d * turn;
+        rec.angle += d * turn;
       }
       rec.root.position.set(rec.pos.x, rec.pos.y, 0);
     };
 
     for (const rec of this.vehicles.values()) {
       step(rec);
-      rec.root.scale.setScalar(vehicleK);
+      rec.age += dt;
+      rec.root.scale.setScalar(vehicleK * popIn(rec.age / 0.35));
       rec.body.position.z = rec.mine ? Math.abs(Math.sin(t * 6)) * 0.25 : 0;
+      articulate(rec, vehicleK, dt, t);
     }
     for (const rec of this.people.values()) {
       step(rec);
+      rec.body.rotation.z = rec.angle;
       const riding = rec.state === "ride";
       const mine = rec.trip !== null && this.vehicles.get(rec.trip);
-      if (mine) rec.root.position.set(mine.pos.x, mine.pos.y, mine.roof * vehicleK);
-      else if (riding) rec.root.position.z = 3.6 * vehicleK;   // somewhere on a roof
+      // Riders sit inside: hide the figure and float their pin just above the roof.
+      if (mine) {
+        const middle = pointAlong(mine, 0, vehicleK);
+        rec.root.position.set(middle.x, middle.y, mine.roof * vehicleK);
+      }
+      else if (riding) rec.root.position.z = 3.6 * vehicleK;   // a typical roof height
+      rec.body.visible = !riding;
+      rec.pin.visible = riding;
+      if (riding) rec.pin.position.z = 1.4 + Math.abs(Math.sin(t * 3)) * 0.35;
       rec.root.scale.setScalar(personK);
       const walking = !riding && rec.speed > 0.4;
       const swing = walking ? Math.sin(t * 11) * 0.6 : 0;

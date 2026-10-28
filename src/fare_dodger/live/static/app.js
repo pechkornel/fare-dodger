@@ -43,9 +43,78 @@ const cam = { zoom: START_ZOOM, target: null };
 
 const markers = { vehicles: new Map(), hunters: [], player: null, dodger: null };
 
+// The main menu shows over the first district's map; a match starts from there.
+let leaving = false;     // closing the connection on purpose (back to the menu)
+let pending = null;      // newest snapshot not drawn yet
+let pendingEvents = [];  // messages from every snapshot since the last frame
+
 function init() {
-  connect();
+  setupMinimap();
+  showMenu();
+  loadDistrict(0);
   requestAnimationFrame(frame);
+}
+
+function showMenu() {
+  document.body.classList.add("in-menu");
+  $("menu").hidden = false;
+  $("overlay").hidden = true;
+  $("countdown").hidden = true;
+}
+
+// --- menu and lobby --------------------------------------------------------------------
+
+function playerName() {
+  const name = $("player-name").value.trim();
+  try { localStorage.setItem("fare-dodger-name", name); } catch { /* private mode */ }
+  return name;
+}
+
+function menuError(message) {
+  $("menu-error").textContent = message;
+  $("menu-error").hidden = !message;
+}
+
+// Opens a connection and says what we want: {type: "solo" | "create" | "join", ...}.
+function openGame(hello) {
+  menuError("");
+  shownRound = null;
+  match = null;
+  connect(hello);
+}
+
+function showLobby(lobby) {
+  $("menu").hidden = true;
+  $("lobby").hidden = false;
+  $("lobby-code").textContent = lobby.code;
+  $("lobby-size").textContent = `${lobby.size}v${lobby.size}`;
+  lobby.teams.forEach((team, t) => {
+    const rows = team.players.map((name) => `<div>👤 ${esc(name)}</div>`)
+      .concat(Array.from({ length: team.bots }, () => '<div class="bot">🤖 bot</div>'));
+    const el = $(`lobby-team-${t}`);
+    el.className = `lobby-team${t === lobby.team ? " mine" : ""}`;
+    el.innerHTML = `<h4>Team ${"AB"[t]}${t === lobby.team ? " (you)" : ""}</h4>${rows.join("")}`;
+  });
+  $("start-game").hidden = !lobby.host;
+  $("lobby-wait").hidden = lobby.host;
+  $("lobby-wait").textContent = `Waiting for ${lobby.host_name || "the host"} to start…`;
+}
+
+function enterGame() {
+  if (!$("lobby").hidden || !$("menu").hidden) {
+    $("lobby").hidden = true;
+    $("menu").hidden = true;
+    document.body.classList.remove("in-menu");
+  }
+}
+
+function quitToMenu() {
+  if (ws) { leaving = true; ws.close(); ws = null; }
+  for (const k of Object.keys(keys)) keys[k] = false;
+  $("lobby").hidden = true;
+  showMenu();
+  district = -1;
+  loadDistrict(0);
 }
 
 function createMap(w) {
@@ -64,7 +133,7 @@ function createMap(w) {
   map.on("zoom", (ev) => { if (ev.originalEvent) cam.zoom = map.getZoom(); }); // pinch
   map.getCanvasContainer().addEventListener("wheel", (ev) => {
     ev.preventDefault();
-    zoomBy(-ev.deltaY * (ev.deltaMode ? 0.05 : 0.0025));
+    zoomBy(-ev.deltaY * (ev.deltaMode ? 0.12 : 0.006));   // a wheel notch: about 0.6
   }, { passive: false });
   return new Promise((resolve) => map.on("load", () => {
     addOverlays();
@@ -80,9 +149,20 @@ function zoomBy(delta) {
 
 function frame() {
   requestAnimationFrame(frame);
+  if (pending) {
+    const snapshot = { ...pending, events: pendingEvents };
+    pending = null;
+    pendingEvents = [];
+    render(snapshot);
+  }
   if (!map || dragging) return;
   const z = map.getZoom();
-  const zoom = Math.abs(cam.zoom - z) < 0.002 ? cam.zoom : z + (cam.zoom - z) * 0.18;
+  const now = performance.now();
+  const dt = Math.min(0.1, (now - (cam.last || now)) / 1000);
+  cam.last = now;
+  // Ease quickly (about 90% of the way in a quarter of a second), independent of frame rate.
+  const ease = 1 - Math.exp(-dt * 10);
+  const zoom = Math.abs(cam.zoom - z) < 0.002 ? cam.zoom : z + (cam.zoom - z) * ease;
   const view = {};
   if (zoom !== z) view.zoom = zoom;
   const pitch = pitchForZoom(zoom);
@@ -177,7 +257,18 @@ function drawStatic(w) {
     { color: MODE_COLORS[line.mode] || "#888" }))));
   map.getSource("stations").setData(fc(w.stations.map((st) => feature(
     { type: "Point", coordinates: lngLat(st.pos) }, { name: st.name }))));
+  // Café signs stay visible in the 3D town too (they are not ``.entity`` markers).
+  for (const m of cafeMarkers) m.remove();
+  cafeMarkers = (w.cafes || []).map((cafe) => {
+    const el = document.createElement("div");
+    el.className = "cafe-sign";
+    el.title = `${cafe.name}: coffee ${w.coffee_price_ft} Ft (C)`;
+    el.textContent = "☕";
+    return new maplibregl.Marker({ element: el }).setLngLat(lngLat(cafe.pos)).addTo(map);
+  });
 }
+
+let cafeMarkers = [];
 
 /** Ring of [lon, lat] approximating a circle of ``radius`` metres. */
 function circle([lat, lon], radius) {
@@ -202,11 +293,34 @@ function clearDynamic() {
   last.money = last.tickets = null;
 }
 
-function connect() {
+function connect(hello) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onmessage = (ev) => render(JSON.parse(ev.data));
-  ws.onclose = () => toast("end", "Disconnected from the server. Reload to play again.");
+  leaving = false;
+  const socket = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = socket;
+  socket.onopen = () => socket.send(JSON.stringify(hello));
+  socket.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "error") {
+      leaving = true;
+      quitToMenu();
+      menuError(msg.message);
+    } else if (msg.type === "closed") {
+      leaving = true;
+      quitToMenu();
+      menuError(msg.message);
+    } else if (msg.type === "lobby") {
+      showLobby(msg);
+    } else {
+      // Draw only the newest snapshot (on the next frame), so a slow frame never builds up
+      // a queue of stale ones; keep every snapshot's messages.
+      pendingEvents.push(...msg.events);
+      pending = msg;
+    }
+  };
+  socket.onclose = () => {
+    if (!leaving && ws === socket) toast("end", "Disconnected from the server. Reload to play again.");
+  };
 }
 
 function send(msg) {
@@ -230,6 +344,7 @@ function divMarker(pos, html, z) {
 }
 
 function render(s) {
+  enterGame();
   match = s.match;
   if (match.district !== district) {
     if (!loading) loadDistrict(match.district);
@@ -241,14 +356,24 @@ function render(s) {
   }
   renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
   renderHunters(s.hunters, s.role);
-  renderDodger(s.dodger);
+  renderDodgers(s.dodgers, s.role);
   renderGround(s);
   renderPlayer(s.player, s.role);
   town.update(s);
   renderScore(match);
   renderHud(s);
+  renderTimer(s, match);
+  renderCountdown(s, match);
+  renderToggle(s);
+  drawMinimap(s);
+  renderPingArrow(s);
   cam.target = s.player.pos;
   if (match.round_over && shownRound !== match.round) showResult(s, match);
+  if (match.round_over && s.room && s.room.next_round_in !== null && !s.room.host) {
+    $("again").textContent = `Next round in ${Math.ceil(s.room.next_round_in)}…`;
+  } else if (match.round_over && s.room && s.room.next_round_in !== null) {
+    $("again").textContent = `Next round in ${Math.ceil(s.room.next_round_in)} · Enter: now`;
+  }
   if (!match.round_over) { $("overlay").hidden = true; shownRound = null; }
 }
 
@@ -286,17 +411,19 @@ function renderHunters(list, role) {
   });
 }
 
-function renderDodger(dodger) {
-  if (!dodger) {
-    if (markers.dodger) { markers.dodger.remove(); markers.dodger = null; }
-    return;
-  }
-  const cls = `toon wanted${dodger.held ? " held" : ""}`;
-  if (!markers.dodger) {
-    markers.dodger = divMarker(dodger.pos, `<div class="${cls}">🏃</div>`, 950);
-  }
-  markers.dodger.setLngLat(lngLat(dodger.pos));
-  markers.dodger.getElement().firstChild.className = cls;
+// Other Dodgers: your teammates when you run, the ones in sight when you hunt.
+function renderDodgers(list, role) {
+  markers.dodgers = markers.dodgers || [];
+  while (markers.dodgers.length > list.length) markers.dodgers.pop().remove();
+  list.forEach((d, i) => {
+    const kind = role === "hunter" ? "wanted" : "mate";
+    const cls = `toon ${kind}${d.held ? " held" : ""}${d.caught ? " out" : ""}`;
+    if (!markers.dodgers[i]) {
+      markers.dodgers[i] = divMarker(d.pos, `<div class="${cls}" title="${esc(d.name)}">🏃</div>`, 950);
+    }
+    markers.dodgers[i].setLngLat(lngLat(d.pos));
+    markers.dodgers[i].getElement().firstChild.className = cls;
+  });
 }
 
 // Sight circles of the Bounty Hunters on foot and the last radar ping, drawn on the ground.
@@ -328,7 +455,8 @@ function renderPlayer(p, role) {
 
 function renderScore(m) {
   $("score-you").textContent = m.score.you;
-  $("score-bots").textContent = m.score.bots;
+  $("score-bots").textContent = m.score.them;
+  $("them-name").textContent = m.names.them;
   const round = m.overtime ? `Overtime · round ${m.round}` : `Round ${m.round} of ${m.regulation}`;
   $("round").textContent = round;
   $("role").textContent = ROLE_LABEL[m.role];
@@ -358,6 +486,9 @@ function renderHud(s) {
     setChip("money", s.wallet.money);
     setChip("tickets", s.wallet.tickets);
   }
+  const coffee = s.coffee || {};
+  $("boost").hidden = coffee.boost_s == null;
+  if (coffee.boost_s != null) $("boost-s").textContent = mmss(coffee.boost_s / world.time_scale);
   $("radar-label").textContent = hunter ? "📡 next report" : "🤠 radar";
   const frac = 1 - s.next_ping_s / world.ping_every_s;
   $("ping-bar").style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
@@ -376,7 +507,10 @@ function renderHud(s) {
 
   let status;
   let held = false;
-  if (s.ride) {
+  if (s.player.state === "caught") {
+    held = true;
+    status = "🚨 You were caught. Watching your team…";
+  } else if (s.ride) {
     const r = s.ride;
     const ticket = hunter ? "" :
       r.fined ? " · 🚨 fined" : r.ticket ? " · 🎫 valid" : " · 🙈 no ticket";
@@ -388,17 +522,27 @@ function renderHud(s) {
     status = `📝 The inspectors are writing your fine… ` +
       `<b>${mmss(s.held_s / world.time_scale)}</b><br>` +
       `<span class="muted">${world.fine_ft} Ft, and the Bounty Hunters know where you are!</span>`;
+  } else if (coffee.brewing_s != null) {
+    status = `☕ Making your coffee… <b>${mmss(coffee.brewing_s / world.time_scale)}</b><br>` +
+      '<span class="muted">Stand still. Keep an eye out for Bounty Hunters!</span>';
   } else if (s.waiting) {
     status = `Waiting for ${esc(s.waiting.route)} → ${esc(s.waiting.headsign)} ` +
       `<span class="muted">(${mmss(s.waiting.in_s / world.time_scale)}, E to cancel)</span>` +
       (s.wallet && !s.wallet.tickets ? '<br><span class="danger">No ticket: risky!</span>' : "");
   } else {
-    status = "On foot" + (s.stop ? "" : ' <span class="muted">· walk to a stop to ride</span>');
+    status = (coffee.boost_s != null ? "☕ Running on coffee" : "On foot") +
+      (s.stop || coffee.cafe ? "" : ' <span class="muted">· walk to a stop to ride</span>');
   }
   $("status").innerHTML = status;
   $("status").className = held ? "status held" : "status";
 
-  if (!s.stop) { $("stop").innerHTML = ""; return; }
+  const cafe = coffee.cafe && coffee.brewing_s == null
+    ? `<h3><span>☕ ${esc(coffee.cafe)}</span>` +
+      `<span class="chip" id="coffee">C · ☕ ${world.coffee_price_ft} Ft</span></h3>` +
+      `<div class="muted">Runs you almost bus-fast for ` +
+      `${mmss(world.coffee_boost_s / world.time_scale)}.</div>`
+    : "";
+  if (!s.stop) { $("stop").innerHTML = cafe; return; }
   const rows = s.stop.departures.map((d, i) =>
     `<div class="dep${d.waiting ? " waiting" : ""}"><span class="key">${i + 1}</span>` +
     pill(d.mode, d.route) +
@@ -406,7 +550,7 @@ function renderHud(s) {
     `<span class="in">${d.in_s <= 0 ? "now" : mmss(d.in_s / world.time_scale)}</span></div>`);
   const buy = s.wallet
     ? `<span class="chip" id="buy">T · 🎫 ${world.ticket_price_ft} Ft</span>` : "";
-  $("stop").innerHTML = `<h3><span>🚏 ${esc(s.stop.name)}</span>${buy}</h3>` +
+  $("stop").innerHTML = cafe + `<h3><span>🚏 ${esc(s.stop.name)}</span>${buy}</h3>` +
     (rows.length ? rows.join("") : '<div class="muted">No departures soon.</div>');
 }
 
@@ -429,37 +573,48 @@ function burst(kind) {
 
 function showResult(s, m) {
   shownRound = m.round;
-  const score = `You ${m.score.you} : ${m.score.bots} Bots`;
+  const score = `You ${m.score.you} : ${m.score.them} ${m.names.them}`;
   const roundWon = s.won;
-  let text = s.message ||
-    (s.role === "dodger"
-      ? `You gave the Bounty Hunters the slip with ${s.wallet.money} Ft left in your pocket.`
-      : "The Dodger got away.");
+  const last = m.history[m.history.length - 1];
+  const points = last ? ` This round: ${last.you}–${last.them}.` : "";
+  let text = (s.message ||
+    (s.runners.total > 1
+      ? `${s.runners.total - s.runners.caught} of ${s.runners.total} Dodgers got away.`
+      : s.role === "dodger"
+        ? `You gave the Bounty Hunters the slip with ${s.stats.money} Ft left in your pocket.`
+        : "The Dodger got away.")) + points;
+  const host = s.room ? s.room.host : true;
   if (m.winner) {
     const won = m.winner === "you";
     $("result-emoji").textContent = won ? "🏆" : "💀";
     $("result-title").textContent = won ? "Match won!" : "Match lost!";
     $("result-text").textContent = `${text} Final score: ${score}.`;
-    $("again").textContent = "New match (R)";
+    $("again").textContent = host ? "Back to the lobby (R)" : "Waiting for the host…";
+    $("again").disabled = !host;
     $("again").dataset.action = "restart";
+    $("to-menu").hidden = false;
   } else {
-    $("result-emoji").textContent = roundWon ? "🎉" : "🚨";
-    $("result-title").textContent = roundWon ? "Round won!" : "Round lost!";
+    $("result-emoji").textContent = roundWon ? "🎉" : roundWon === null ? "🤝" : "🚨";
+    $("result-title").textContent =
+      roundWon ? "Round won!" : roundWon === null ? "Round drawn" : "Round lost!";
     if (m.next_role && m.next_role !== s.role) {
       const why = m.round === m.regulation / 2 ? "Halftime! "
         : m.round === m.regulation ? "Overtime: win by two! " : "";
       text += ` ${why}You switch sides: next round you are the ${ROLE_LABEL[m.next_role]}.`;
     }
     $("result-text").textContent = `${text} ${score}.`;
-    $("again").textContent = "Next round (Enter)";
+    $("again").textContent = host ? "Next round now (Enter)" : "Next round soon…";
+    $("again").disabled = !host;
     $("again").dataset.action = "next";
+    $("to-menu").hidden = true;
   }
   $("result-stats").textContent = s.role === "dodger"
     ? `${s.clock} · ${s.stats.rides} rides · ${s.stats.tickets_bought} tickets · ` +
       `${s.stats.fines} fines · walked ${s.stats.walked_m} m`
     : `${s.clock} · ${s.stats.rides} rides · walked ${s.stats.walked_m} m`;
   $("history").innerHTML = m.history
-    .map((r) => `<span class="dot ${r.won ? "won" : "lost"}" title="${ROLE_LABEL[r.role]}">` +
+    .map((r) => `<span class="dot ${r.won ? "won" : r.you === r.them ? "" : "lost"}" ` +
+      `title="${ROLE_LABEL[r.role]} · ${r.you}–${r.them}">` +
       `${r.role === "dodger" ? "🏃" : "🤠"}</span>`)
     .join("");
   $("overlay").hidden = false;
@@ -481,6 +636,8 @@ function sendKeys() { send({ type: "keys", ...keys }); }
 
 window.addEventListener("keydown", (ev) => {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (ev.target instanceof HTMLInputElement) return; // typing a name or a code
+  if (!$("menu").hidden || !$("lobby").hidden) return;
   const dir = KEYMAP[ev.code];
   if (dir) {
     ev.preventDefault();
@@ -488,15 +645,21 @@ window.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.repeat) return;
+  if (ev.code === "Escape") {
+    if (match && match.winner) quitToMenu();
+    else if (confirm("Leave the match and go back to the main menu?")) quitToMenu();
+    return;
+  }
   if (ev.code === "Enter" || ev.code === "NumpadEnter") { ev.preventDefault(); nextRound(); }
   else if (ev.code === "KeyE" || ev.code === "Space") {
     ev.preventDefault(); send({ type: "use" });
   }
   else if (/^Digit[1-6]$/.test(ev.code)) send({ type: "wait", index: Number(ev.code.slice(5)) - 1 });
   else if (ev.code === "KeyT") send({ type: "ticket" });
+  else if (ev.code === "KeyC") send({ type: "coffee" });
   else if (ev.code === "KeyF") setFollow(true);
-  else if (ev.code === "Equal" || ev.code === "NumpadAdd") zoomBy(0.75);
-  else if (ev.code === "Minus" || ev.code === "NumpadSubtract") zoomBy(-0.75);
+  else if (ev.code === "Equal" || ev.code === "NumpadAdd") zoomBy(1);
+  else if (ev.code === "Minus" || ev.code === "NumpadSubtract") zoomBy(-1);
   else if (ev.code === "KeyR") restart();
 });
 
@@ -513,11 +676,253 @@ window.addEventListener("blur", () => {
 // The stop panel is redrawn every snapshot, so a click (down and up on one element) can miss.
 $("stop").addEventListener("pointerdown", (ev) => {
   if (ev.target.closest("#buy")) send({ type: "ticket" });
+  if (ev.target.closest("#coffee")) send({ type: "coffee" });
 });
 $("again").addEventListener("click", () => {
   if ($("again").dataset.action === "restart") restart();
   else nextRound();
 });
 $("follow").addEventListener("click", () => setFollow(true));
+$("to-menu").addEventListener("click", quitToMenu);
+$("ride-toggle").addEventListener("click", () => send({ type: "use" }));
+try { $("player-name").value = localStorage.getItem("fare-dodger-name") || ""; } catch { /* */ }
+$("play-solo").addEventListener("click", () => openGame({ type: "solo", name: playerName() }));
+for (const button of document.querySelectorAll("#menu [data-size]")) {
+  button.addEventListener("click", () =>
+    openGame({ type: "create", size: Number(button.dataset.size), name: playerName() }));
+}
+$("join").addEventListener("click", () => {
+  const code = $("join-code").value.trim().toUpperCase();
+  if (code.length !== 4) { menuError("Type the 4-letter code of the game."); return; }
+  openGame({ type: "join", code, name: playerName() });
+});
+$("join-code").addEventListener("keydown", (ev) => { if (ev.key === "Enter") $("join").click(); });
+$("switch-team").addEventListener("click", () => send({ type: "team" }));
+$("start-game").addEventListener("click", () => send({ type: "start" }));
+$("leave-lobby").addEventListener("click", quitToMenu);
+
+// --- round timer and countdown ------------------------------------------------------------
+
+function renderTimer(s, m) {
+  $("topbar").hidden = false;
+  const real = s.remaining_s / world.time_scale;
+  $("round-timer").textContent = mmss(real);
+  $("round-timer").parentElement.classList.toggle("low", real <= 30 && s.status === "running");
+  const free = s.runners.total > 1
+    ? ` · ${s.runners.total - s.runners.caught}/${s.runners.total} free` : "";
+  $("round-label").textContent =
+    (m.overtime ? `Overtime ${m.round}` : `Round ${m.round}/${m.regulation}`) + free;
+}
+
+function renderCountdown(s, m) {
+  const left = s.freeze_s || 0;
+  $("countdown").hidden = left <= 0;
+  if (left <= 0) return;
+  const n = String(Math.ceil(left));
+  const el = $("countdown-number");
+  if (el.textContent !== n) {
+    el.textContent = n;
+    el.style.animation = "none";
+    void el.offsetWidth; // restart the pop
+    el.style.animation = "";
+  }
+  $("countdown-what").textContent =
+    `Round ${m.round} · you are the ${ROLE_LABEL[m.role]} · ${world.name}`;
+}
+
+// --- get on / get off switch (blue: riding or getting on, red: getting off) ----------------
+
+function renderToggle(s) {
+  const el = $("ride-toggle");
+  let state = null;
+  let title = "";
+  let detail = "";
+  if (s.ride) {
+    const r = s.ride;
+    if (r.fined) {
+      state = "off-req locked"; title = "GETTING OFF";
+      detail = `Inspectors: off at ${r.alight_at}`;
+    } else if (r.alight_at) {
+      state = "off-req"; title = "GETTING OFF"; detail = `at ${r.alight_at} · tap to stay on`;
+    } else {
+      state = "on"; title = "ON BOARD"; detail = `${r.route} → ${r.headsign} · tap to get off`;
+    }
+  } else if (s.waiting) {
+    state = "on"; title = "GETTING ON";
+    detail = `${s.waiting.route} in ${mmss(s.waiting.in_s / world.time_scale)} · tap to cancel`;
+  } else if (s.stop && s.stop.departures.length && s.player.state === "walk") {
+    state = ""; title = "GET ON";
+    const d = s.stop.departures[0];
+    detail = `${d.route} → ${d.headsign} · tap or E`;
+  }
+  el.hidden = state === null || s.status !== "running";
+  if (el.hidden) return;
+  el.className = state;
+  $("ride-title").textContent = title;
+  $("ride-detail").textContent = detail;
+}
+
+// --- minimap: the district, you, and for Bounty Hunters the reports and the team ----------
+
+const mini = { canvas: null, ctx: null, base: null, district: -1, project: null, dpr: 1 };
+
+function setupMinimap() {
+  mini.canvas = $("minimap");
+  mini.dpr = window.devicePixelRatio || 1;
+  mini.canvas.width = 220 * mini.dpr;
+  mini.canvas.height = 220 * mini.dpr;
+  mini.ctx = mini.canvas.getContext("2d");
+}
+
+function minimapPath(c, points) {
+  c.beginPath();
+  points.forEach((p, i) => {
+    const [x, y] = mini.project(p);
+    if (i) c.lineTo(x, y); else c.moveTo(x, y);
+  });
+}
+
+function minimapBase() {
+  // The district outline, lines, stations and cafés, drawn once per district.
+  const size = 220 * mini.dpr;
+  const pad = 14 * mini.dpr;
+  const area = world.area;
+  const ring = area.kind === "polygon" ? area.vertices : world.stations.map((st) => st.pos);
+  const kx = Math.cos((world.center[0] * Math.PI) / 180);
+  const xs = ring.map(([, lon]) => lon * kx);
+  const ys = ring.map(([lat]) => lat);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const scale = (size - 2 * pad) / Math.max(x1 - x0, y1 - y0);
+  const ox = (size - (x1 - x0) * scale) / 2;
+  const oy = (size - (y1 - y0) * scale) / 2;
+  mini.project = ([lat, lon]) => [ox + (lon * kx - x0) * scale, oy + (y1 - lat) * scale];
+  mini.perMetre = scale / 111320;
+
+  const base = document.createElement("canvas");
+  base.width = base.height = size;
+  const c = base.getContext("2d");
+  c.fillStyle = "#e9dcc0";
+  c.fillRect(0, 0, size, size);
+  if (area.kind === "polygon") {
+    minimapPath(c, area.vertices);
+    c.closePath();
+    c.fillStyle = "#fffaf0";
+    c.fill();
+    c.lineWidth = 2 * mini.dpr;
+    c.setLineDash([6 * mini.dpr, 4 * mini.dpr]);
+    c.strokeStyle = INK;
+    c.stroke();
+    c.setLineDash([]);
+  }
+  c.lineCap = c.lineJoin = "round";
+  c.globalAlpha = 0.7;
+  c.lineWidth = 2.2 * mini.dpr;
+  for (const line of world.lines) {
+    minimapPath(c, line.path);
+    c.strokeStyle = MODE_COLORS[line.mode] || "#888";
+    c.stroke();
+  }
+  c.globalAlpha = 1;
+  for (const st of world.stations) {
+    const [x, y] = mini.project(st.pos);
+    c.beginPath();
+    c.arc(x, y, 2.2 * mini.dpr, 0, 2 * Math.PI);
+    c.fillStyle = "#fff";
+    c.fill();
+    c.lineWidth = 1.2 * mini.dpr;
+    c.strokeStyle = INK;
+    c.stroke();
+  }
+  c.fillStyle = "#8b5a2b";
+  for (const cafe of world.cafes || []) {
+    const [x, y] = mini.project(cafe.pos);
+    c.fillRect(x - 3 * mini.dpr, y - 3 * mini.dpr, 6 * mini.dpr, 6 * mini.dpr);
+  }
+  mini.base = base;
+  mini.district = district;
+}
+
+function miniDot(c, pos, color, radius, ring = INK) {
+  const [x, y] = mini.project(pos);
+  c.beginPath();
+  c.arc(x, y, radius * mini.dpr, 0, 2 * Math.PI);
+  c.fillStyle = color;
+  c.fill();
+  c.lineWidth = 2 * mini.dpr;
+  c.strokeStyle = ring;
+  c.stroke();
+}
+
+function drawMinimap(s) {
+  mini.canvas.hidden = false;
+  if (mini.district !== district) minimapBase();
+  const c = mini.ctx;
+  c.drawImage(mini.base, 0, 0);
+  if (s.role === "hunter") {
+    for (const ping of s.pings || []) {
+      // Where each Dodger was last reported: a circle that fades and grows with its age.
+      const [x, y] = mini.project(ping.pos);
+      const fresh = Math.max(0, 1 - ping.age_s / world.ping_every_s);
+      const r = Math.max(6 * mini.dpr, (60 + ping.age_s * 1.4) * mini.perMetre);
+      c.beginPath();
+      c.arc(x, y, r, 0, 2 * Math.PI);
+      c.fillStyle = `rgba(224, 49, 49, ${0.12 + 0.2 * fresh})`;
+      c.fill();
+      c.lineWidth = 2 * mini.dpr;
+      c.strokeStyle = `rgba(224, 49, 49, ${0.4 + 0.6 * fresh})`;
+      c.stroke();
+      c.font = `700 ${13 * mini.dpr}px Fredoka, sans-serif`;
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.fillStyle = INK;
+      c.fillText("?", x, y);
+    }
+    for (const h of s.hunters) miniDot(c, h.pos, "#ffa8a8", 4);
+    for (const d of s.dodgers) if (!d.caught) miniDot(c, d.pos, "#ffd43b", 5);
+    miniDot(c, s.player.pos, "#fa5252", 5.5, "#fff");
+  } else {
+    // The Dodgers' map shows their own team, never the Bounty Hunters.
+    for (const d of s.dodgers) miniDot(c, d.pos, d.caught ? "#adb5bd" : "#8ce99a", 4);
+    miniDot(c, s.player.pos, "#40c057", 5.5, "#fff");
+  }
+}
+
+// --- arrow at the screen edge towards the latest report (Bounty Hunters) -------------------
+
+function metresBetween([lat1, lon1], [lat2, lon2]) {
+  const k = Math.cos((((lat1 + lat2) / 2) * Math.PI) / 180);
+  return Math.hypot((lat2 - lat1) * 111320, (lon2 - lon1) * 111320 * k);
+}
+
+function renderPingArrow(s) {
+  const el = $("ping-arrow");
+  if (s.role !== "hunter" || !s.ping || s.status !== "running") { el.hidden = true; return; }
+  const box = map.getContainer().getBoundingClientRect();
+  const p = map.project(lngLat(s.ping.pos));
+  // The frame the arrow runs along: clear of the top bar and the bottom controls.
+  const left = 60;
+  const right = box.width - 60;
+  const top = 110;
+  const bottom = box.height - 120;
+  const inside = p.x > left && p.x < right && p.y > top && p.y < bottom;
+  const cx = box.width / 2;
+  const cy = box.height / 2;
+  const dx = p.x - cx;
+  const dy = p.y - cy;
+  if (inside || !Number.isFinite(dx) || !Number.isFinite(dy) || (!dx && !dy)) {
+    el.hidden = true;
+    return;
+  }
+  const tx = dx > 0 ? (right - cx) / dx : dx < 0 ? (left - cx) / dx : Infinity;
+  const ty = dy > 0 ? (bottom - cy) / dy : dy < 0 ? (top - cy) / dy : Infinity;
+  const t = Math.min(tx, ty);
+  el.style.left = `${cx + dx * t}px`;
+  el.style.top = `${cy + dy * t}px`;
+  $("ping-pointer").style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+  const m = metresBetween(s.player.pos, s.ping.pos);
+  $("ping-dist").textContent = m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+  el.hidden = false;
+}
 
 init();
+

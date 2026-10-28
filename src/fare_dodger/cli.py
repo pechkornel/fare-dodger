@@ -9,9 +9,11 @@ import time
 import tomllib
 import webbrowser
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 import uvicorn
 
@@ -20,8 +22,18 @@ from fare_dodger.bots import DODGER_BOTS, INSPECTOR_BOTS
 from fare_dodger.config import NetworkConfig, RulesConfig
 from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
+from fare_dodger.live.cafes import download_cafes, pick_cafes, read_cafes
 from fare_dodger.live.match import District
+from fare_dodger.live.parks import Parks, download_parks, read_parks
 from fare_dodger.live.server import create_app
+from fare_dodger.live.streets import (
+    BBox,
+    StreetGraph,
+    area_bbox,
+    covering_bbox,
+    download_streets,
+    read_streets,
+)
 from fare_dodger.live.world import World
 from fare_dodger.modes import VEHICLE_MODES
 from fare_dodger.network.timetable import Timetable
@@ -287,6 +299,26 @@ def sim(
 LIVE_CONFIG = Path("configs/live.toml")
 
 
+def _load_osm_extra[T](
+    what: str,
+    path: Path,
+    bbox: BBox,
+    read: Callable[[Path, BBox], list[T] | None],
+    download: Callable[[Path, BBox], Path],
+) -> list[T]:
+    """An optional OpenStreetMap layer, downloaded once; empty (with a warning) if that fails."""
+    found = read(path, bbox)
+    if found is None:
+        typer.echo(f"downloading {what} from OpenStreetMap (Overpass)...", err=True)
+        try:
+            download(path, bbox)
+        except httpx.HTTPError as exc:
+            typer.echo(f"  no {what} this time ({exc}); playing without them", err=True)
+            return []
+        found = read(path, bbox) or []
+    return found
+
+
 @app.command()
 def play(
     config: Annotated[
@@ -300,6 +332,13 @@ def play(
     open_browser: Annotated[
         bool, typer.Option("--open", help="Open the game in a browser")
     ] = False,
+    streets: Annotated[
+        bool,
+        typer.Option(
+            "--streets/--free-walk",
+            help="Walk along OpenStreetMap streets (downloaded once), or freely",
+        ),
+    ] = True,
 ) -> None:
     """Play the live game in the browser: a match of rounds on Budapest districts, as the
     Dodger and as a Bounty Hunter. Walk with WASD, ride real trams and buses."""
@@ -307,14 +346,39 @@ def play(
     if seed is not None:
         cfg = cfg.model_copy(update={"seed": seed})
     workspace = Workspace.at(data)
+    nets = live_districts(config)
+    osm = None
+    if streets:
+        bbox = covering_bbox([area_bbox(net.area) for _, net in nets])
+        osm = read_streets(workspace.streets_file, bbox)
+        if osm is None:
+            typer.echo("downloading streets from OpenStreetMap (Overpass, ~1 min)...", err=True)
+            download_streets(workspace.streets_file, bbox)
+            osm = read_streets(workspace.streets_file, bbox)
+    everywhere = covering_bbox([area_bbox(net.area) for _, net in nets])
+    cafes = _load_osm_extra("cafés", workspace.cafes_file, everywhere, read_cafes, download_cafes)
+    parks = (
+        _load_osm_extra("parks", workspace.parks_file, everywhere, read_parks, download_parks)
+        if streets
+        else []
+    )
     districts = []
-    for name, net in live_districts(config):
+    for name, net in nets:
         started = time.perf_counter()
         tt, _, _ = workspace.network(net)
-        hops = workspace.vehicle_paths(net, tt)
-        districts.append(District(name, World(tt, net.area, hops)))
+        world = World(tt, net.area, workspace.vehicle_paths(net, tt))
+        if osm is not None:
+            world.set_streets(StreetGraph.from_osm(*osm, world.proj.to_xy, net.area.contains))
+        world.cafes = pick_cafes(cafes, world, cfg.cafes_per_district)
+        if parks:
+            world.parks = Parks.from_latlon(parks, world.proj.to_xy, net.area.contains)
+        districts.append(District(name, world))
+        street_info = f", {len(world.streets)} street nodes" if world.streets else ""
+        street_info += f", {len(world.cafes)} cafés"
+        if world.parks is not None:
+            street_info += f", {len(world.parks)} parks and squares"
         typer.echo(
-            f"  {name}: {tt.n_nodes} stations, {tt.n_patterns} patterns "
+            f"  {name}: {tt.n_nodes} stations, {tt.n_patterns} patterns{street_info} "
             f"({time.perf_counter() - started:.1f}s)",
             err=True,
         )
