@@ -1,9 +1,9 @@
-"""Bot Inspectors for the live game.
+"""Bot Bounty Hunters for the live game.
 
-Each Inspector follows a RAPTOR journey (walk and ride legs on real trips) to a target
+Each Bounty Hunter follows a RAPTOR journey (walk and ride legs on real trips) to a target
 station. Targets come from what the team knows: before the first ping they spread over the
 district. After a ping they cover the stations the Dodger could have reached since then
-(farthest-point spread, starting at the pinged station). An Inspector on foot who sees the
+(farthest-point spread, starting at the pinged station). A Bounty Hunter on foot who sees the
 Dodger on foot gives chase directly, and walks back to the network when it loses sight.
 """
 
@@ -19,11 +19,11 @@ from fare_dodger.routing.raptor import raptor, reachable
 
 #: Stations the Dodger could reach this long after a ping are covered by the first targets.
 PING_SPREAD_S = 300
-#: Extra look-ahead when idle Inspectors pick a new station to search.
+#: Extra look-ahead when idle Bounty Hunters pick a new station to search.
 SEARCH_LOOKAHEAD_S = 120
 #: Journeys longer than this are not planned.
 PLAN_HORIZON_S = 3600
-#: An Inspector with nowhere to go waits this long before looking again.
+#: A Bounty Hunter with nowhere to go waits this long before looking again.
 IDLE_WAIT_S = 20
 
 
@@ -75,7 +75,7 @@ class Agent:
     idle_until: float = 0.0
 
 
-class LiveInspectors:
+class BountyHunters:
     def __init__(
         self, world: World, cfg: LiveConfig, starts: list[int], rng: random.Random
     ) -> None:
@@ -121,7 +121,7 @@ class LiveInspectors:
         return chosen
 
     def _assign(self, origins: list[int], targets: list[int]) -> list[int]:
-        """Greedy nearest assignment: each target to the closest unassigned Inspector."""
+        """Greedy nearest assignment: each target to the closest unassigned Bounty Hunter."""
         xy = self.world.node_xy
         result = [-1] * len(origins)
         free = set(range(len(origins)))

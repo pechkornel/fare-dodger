@@ -13,6 +13,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `configs/live.toml`; ADR 0005.
 - Live game: vehicles follow their GTFS shapes between stops instead of straight lines, and
   the map draws route lines along the same paths (cached as `hops.json`).
+- Live game: tickets (buy at a stop with T, or ride without one), hidden ticket inspectors on
+  35% of trips, and fines that hold you at the next stop and alert the chasers. The chasers are
+  now called Bounty Hunters (`n_hunters`). The client has a cartoon look.
 
 ## [0.1.0] - 2026-10-28
 

@@ -44,10 +44,11 @@ def node(world: World, name: str) -> int:
 
 
 def solo_game(world: World, at: str, **overrides: object) -> LiveGame:
-    """A game with the Dodger at station ``at`` and no Inspectors."""
-    game = LiveGame(world, LiveConfig.model_validate(overrides), seed=1)
+    """A game with the Dodger at station ``at``, no Bounty Hunters and (unless overridden) no
+    ticket inspectors."""
+    game = LiveGame(world, LiveConfig.model_validate({"inspected_share": 0.0, **overrides}), seed=1)
     game.dodger.pos = world.node_xy[node(world, at)]
-    game.inspectors.agents = []
+    game.hunters.agents = []
     return game
 
 
@@ -121,64 +122,62 @@ def test_walking_away_cancels_waiting(world: World) -> None:
     assert game.dodger.waiting_for is None and game.dodger.ride is None
 
 
-def test_inspector_on_foot_catches_nearby_dodger(world: World) -> None:
+def test_hunter_on_foot_catches_nearby_dodger(world: World) -> None:
     game = solo_game(world, "Market")
     x, y = game.dodger.pos
-    game.inspectors.agents = [Agent(node(world, "Market"), (x + 60, y), node(world, "Market"))]
+    game.hunters.agents = [Agent(node(world, "Market"), (x + 60, y), node(world, "Market"))]
     game.step(60)
     assert game.status is Status.CAUGHT
 
 
-def test_riding_past_an_inspector_is_safe_but_stopping_is_not(world: World) -> None:
+def test_riding_past_an_hunter_is_safe_but_stopping_is_not(world: World) -> None:
     game = solo_game(world, "West")
     west, central = world.node_xy[node(world, "West")], world.node_xy[node(world, "Central")]
     mid = ((west[0] + central[0]) / 2, (west[1] + central[1]) / 2)
     watcher = Agent(node(world, "West"), mid, node(world, "West"), needs_replan=False)
     watcher.idle_until = 1e9  # stands still beside the track
-    game.inspectors.agents = [watcher]
+    game.hunters.agents = [watcher]
     game.wait_for(0)
-    game.step(90)  # rides straight past the Inspector halfway to Central
+    game.step(90)  # rides straight past the Bounty Hunter halfway to Central
     assert game.status.value == "running"
     watcher.pos = central
-    game.step(60)  # the train stands at Central next to the Inspector
+    game.step(60)  # the train stands at Central next to the Bounty Hunter
     assert game.status.value == "caught"
 
 
-def test_inspector_on_the_same_trip_catches(world: World) -> None:
+def test_hunter_on_the_same_trip_catches(world: World) -> None:
     tt = world.tt
     plan = raptor(tt, [node(world, "Central")], EIGHT, EIGHT + 900).journey(node(world, "East"))
     state = journey_state(world, plan, EIGHT + 150)
     assert state.trip == m1_east_at_eight(world)  # rides the 08:00 from West, like the Dodger
     game = solo_game(world, "West", catch_radius_m=1.0, sight_radius_m=0.0)
-    inspector = Agent(node(world, "Central"), world.node_xy[node(world, "Central")], 0)
-    inspector.plan, inspector.needs_replan = plan, False
-    game.inspectors.agents = [inspector]
+    hunter = Agent(node(world, "Central"), world.node_xy[node(world, "Central")], 0)
+    hunter.plan, hunter.needs_replan = plan, False
+    game.hunters.agents = [hunter]
     game.wait_for(0)
     game.step(170)
     assert game.status is Status.CAUGHT
-    assert "ticket" in (game.caught_by or "")
+    assert "riding the M1" in (game.caught_by or "")
 
 
 def test_pings_and_escape(world: World) -> None:
     game = solo_game(world, "Central", duration_minutes=7, ping_every_s=180)
     game.step(181)
     assert len(game.pings) == 1
-    assert game.inspectors.last_ping == game.pings[0]
+    assert game.hunters.last_ping == game.pings[0]
     assert game.pings[0].node == node(world, "Central")
     game.step(10_000)
     assert game.status is Status.ESCAPED
     assert game.t == game.cfg.end_seconds
 
 
-def test_bot_inspectors_play_a_whole_game(world: World) -> None:
+def test_bot_hunters_play_a_whole_game(world: World) -> None:
     game = LiveGame(world, LiveConfig(), seed=3)
-    starts = [a.pos for a in game.inspectors.agents]
+    starts = [a.pos for a in game.hunters.agents]
     moved = False
     for _ in range(3600):
         game.step(0.5)
-        moved = moved or any(
-            a.pos != s for a, s in zip(game.inspectors.agents, starts, strict=True)
-        )
+        moved = moved or any(a.pos != s for a, s in zip(game.hunters.agents, starts, strict=True))
         if game.status is not Status.RUNNING:
             break
     assert moved
@@ -250,3 +249,75 @@ def test_hops_are_cached(timetable: Timetable, mini_gtfs_dir: Path, tmp_path: Pa
     built = load_or_build_hops(mini_gtfs_dir, timetable, tmp_path)
     assert (tmp_path / HOPS_FILE).is_file()
     assert load_or_build_hops(tmp_path / "no-feed-here", timetable, tmp_path) == built
+
+
+def board_first_departure(game: LiveGame) -> None:
+    game.wait_for(0)
+    game.step(1)
+    assert game.dodger.ride is not None
+
+
+def test_buy_ticket_only_at_a_stop_and_with_money(world: World) -> None:
+    game = solo_game(world, "West", start_money_ft=500, ticket_price_ft=450)
+    game.buy_ticket()
+    assert (game.dodger.money, game.dodger.tickets) == (50, 1)
+    game.buy_ticket()  # not enough money left
+    assert (game.dodger.money, game.dodger.tickets) == (50, 1)
+    game.dodger.pos = (game.dodger.pos[0], game.dodger.pos[1] + 500)  # away from any stop
+    game.dodger.money = 1000
+    game.buy_ticket()
+    assert game.dodger.tickets == 1
+
+
+def test_inspected_share_and_determinism(world: World) -> None:
+    share = len(LiveGame(world, LiveConfig(), seed=7).inspected) / world.tt.n_trips
+    assert 0.2 < share < 0.5
+    assert (
+        LiveGame(world, LiveConfig(), seed=7).inspected
+        == LiveGame(world, LiveConfig(), seed=7).inspected
+    )
+    assert not LiveGame(world, LiveConfig(inspected_share=0.0), seed=7).inspected
+
+
+def test_ticket_is_used_on_boarding_and_passes_inspection(world: World) -> None:
+    game = solo_game(world, "West", inspected_share=1.0)
+    game.buy_ticket()
+    money = game.dodger.money
+    board_first_departure(game)
+    ride = game.dodger.ride
+    assert ride is not None and ride.ticket and not ride.fined
+    assert game.dodger.tickets == 0
+    game.step(300)
+    assert game.status is Status.RUNNING
+    assert (game.dodger.money, game.dodger.fines) == (money, 0)
+
+
+def test_no_ticket_means_a_fine_and_being_held(world: World) -> None:
+    game = solo_game(world, "West", inspected_share=1.0, fine_ft=1000, fine_hold_s=60)
+    board_first_departure(game)
+    ride = game.dodger.ride
+    assert ride is not None and ride.fined
+    game.use()  # can't choose where to get off any more
+    assert game.snapshot()["ride"]["alight_at"] == "Central"
+    game.step(120)  # arrives at Central at 08:02
+    central = world.node_xy[node(world, "Central")]
+    assert game.dodger.pos == central and game.dodger.held_until is not None
+    assert game.pings and game.pings[-1].node == node(world, "Central")  # reported
+    game.keys = Keys(up=True)
+    game.step(30)
+    assert game.dodger.pos == central  # held: can't walk away
+    assert game.snapshot()["player"]["state"] == "held"
+    game.step(31)
+    dodger = game.dodger  # re-read: mypy keeps the narrowing from before step()
+    assert dodger.held_until is None
+    assert (dodger.money, dodger.fines) == (1000, 1)
+    game.step(10)
+    assert dodger.pos != central  # free to go
+
+
+def test_cannot_pay_the_fine_is_game_over(world: World) -> None:
+    game = solo_game(world, "West", inspected_share=1.0, start_money_ft=300, fine_ft=1000)
+    game.wait_for(0)
+    game.step(1)
+    assert game.status is Status.CAUGHT
+    assert "fine" in (game.caught_by or "")

@@ -5,7 +5,9 @@ const KEYMAP = {
   KeyW: "up", ArrowUp: "up", KeyS: "down", ArrowDown: "down",
   KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right",
 };
-const MODE_COLORS = { metro: "#7048e8", tram: "#f2c200", trolleybus: "#e8590c", bus: "#1c7ed6" };
+const MODE_COLORS = { metro: "#7950f2", tram: "#fcc419", trolleybus: "#fd7e14", bus: "#339af0" };
+const MODE_ICONS = { metro: "🚇", tram: "🚋", trolleybus: "🚎", bus: "🚌" };
+const INK = "#2b2118";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -13,15 +15,19 @@ const mmss = (s) => {
   s = Math.max(0, Math.round(s));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
+const pill = (mode, route) =>
+  `<span class="pill ${mode}">${MODE_ICONS[mode] || ""}${esc(route)}</span>`;
 
 let world = null;
 let map = null;
 let ws = null;
 let follow = true;
 let gameOver = false;
+let burstTimer = null;
 const keys = { up: false, down: false, left: false, right: false };
+const last = { money: null, tickets: null };
 
-const markers = { vehicles: new Map(), inspectors: [], sight: [], player: null, ping: null };
+const markers = { vehicles: new Map(), hunters: [], sight: [], player: null, ping: null };
 
 async function init() {
   world = await (await fetch("api/world")).json();
@@ -31,25 +37,30 @@ async function init() {
   drawArea(world.area);
   for (const line of world.lines) {
     L.polyline(line.path, {
-      color: MODE_COLORS[line.mode] || "#888", weight: 3, opacity: 0.35, interactive: false,
+      color: INK, weight: 8, opacity: 0.18, lineCap: "round", lineJoin: "round",
+      interactive: false,
+    }).addTo(map);
+    L.polyline(line.path, {
+      color: MODE_COLORS[line.mode] || "#888", weight: 5, opacity: 0.7, lineCap: "round",
+      lineJoin: "round", interactive: false,
     }).addTo(map);
   }
   for (const st of world.stations) {
     L.circleMarker(st.pos, {
-      radius: 4, color: "#343a40", weight: 2, fillColor: "#fff", fillOpacity: 1,
-    }).bindTooltip(esc(st.name), { direction: "top", offset: [0, -4] }).addTo(map);
+      radius: 5, color: INK, weight: 3, fillColor: "#fff", fillOpacity: 1,
+    }).bindTooltip(esc(st.name), { direction: "top", offset: [0, -6] }).addTo(map);
   }
   map.on("dragstart", () => setFollow(false));
   connect();
 }
 
 function drawArea(area) {
-  const style = { color: "#343a40", weight: 2, dashArray: "6 6", fill: false, interactive: false };
+  const style = { color: INK, weight: 3, dashArray: "10 8", fill: false, interactive: false };
   if (area.kind === "polygon") {
     // Dim everything outside the play area: a world-sized ring with the area as a hole.
-    const world = [[-89, -179], [-89, 179], [89, 179], [89, -179]];
-    L.polygon([world, area.vertices], {
-      stroke: false, fillColor: "#000", fillOpacity: 0.35, interactive: false,
+    const outside = [[-89, -179], [-89, 179], [89, 179], [89, -179]];
+    L.polygon([outside, area.vertices], {
+      stroke: false, fillColor: INK, fillOpacity: 0.3, interactive: false,
     }).addTo(map);
     L.polygon(area.vertices, style).addTo(map);
   } else if (area.kind === "circle") {
@@ -85,9 +96,12 @@ function divMarker(pos, html, className, size) {
 }
 
 function render(s) {
-  for (const e of s.events) toast(e.kind, e.text);
-  renderVehicles(s.vehicles);
-  renderInspectors(s.inspectors);
+  for (const e of s.events) {
+    toast(e.kind, e.text);
+    if (e.kind === "inspection") burst(e.text.includes("valid") ? "good" : "bad");
+  }
+  renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
+  renderHunters(s.hunters);
   renderPing(s.ping);
   renderPlayer(s.player);
   renderHud(s);
@@ -98,38 +112,43 @@ function render(s) {
   gameOver = over;
 }
 
-function renderVehicles(list) {
+function renderVehicles(list, myTrip) {
   const seen = new Set();
   for (const [trip, lat, lon, mode, route] of list) {
     seen.add(trip);
     let m = markers.vehicles.get(trip);
     if (!m) {
-      const html = `<span class="pill ${mode}">${esc(route)}</span>`;
-      m = divMarker([lat, lon], html, "vehicle", [40, 18]);
+      m = divMarker([lat, lon], pill(mode, route), "vehicle", [60, 22]);
       markers.vehicles.set(trip, m);
     } else {
       m.setLatLng([lat, lon]);
     }
+    const el = m.getElement();
+    if (el) el.classList.toggle("mine", trip === myTrip);
+    m.setZIndexOffset(trip === myTrip ? 900 : 0);
   }
   for (const [trip, m] of markers.vehicles) {
     if (!seen.has(trip)) { m.remove(); markers.vehicles.delete(trip); }
   }
 }
 
-function renderInspectors(list) {
-  list.forEach((insp, i) => {
-    const cls = `inspector-dot${insp.riding ? " riding" : ""}${insp.chasing ? " chasing" : ""}`;
-    if (!markers.inspectors[i]) {
-      markers.inspectors[i] = divMarker(insp.pos, `<div class="${cls}"></div>`, "", [24, 24]);
-      markers.sight[i] = L.circle(insp.pos, {
-        radius: world.sight_radius_m, color: "#e03131", weight: 1, opacity: 0.5,
-        fillOpacity: 0.06, interactive: false,
+function renderHunters(list) {
+  list.forEach((hunter, i) => {
+    const cls = `toon hunter${hunter.riding ? " riding" : ""}${hunter.chasing ? " chasing" : ""}`;
+    if (!markers.hunters[i]) {
+      markers.hunters[i] = divMarker(hunter.pos, `<div class="${cls}">🤠</div>`, "", [34, 34]);
+      markers.hunters[i].setZIndexOffset(800);
+      markers.sight[i] = L.circle(hunter.pos, {
+        radius: world.sight_radius_m, color: "#fa5252", weight: 2, dashArray: "6 6",
+        opacity: 0.6, fillOpacity: 0.08, interactive: false,
       }).addTo(map);
     }
-    markers.inspectors[i].setLatLng(insp.pos);
-    markers.inspectors[i].getElement().firstChild.className = cls;
-    markers.sight[i].setLatLng(insp.pos);
-    markers.sight[i].setStyle({ opacity: insp.riding ? 0 : 0.5, fillOpacity: insp.riding ? 0 : 0.06 });
+    markers.hunters[i].setLatLng(hunter.pos);
+    markers.hunters[i].getElement().firstChild.className = cls;
+    markers.sight[i].setLatLng(hunter.pos);
+    markers.sight[i].setStyle({
+      opacity: hunter.riding ? 0 : 0.6, fillOpacity: hunter.riding ? 0 : 0.08,
+    });
   });
 }
 
@@ -137,7 +156,7 @@ function renderPing(ping) {
   if (!ping) { if (markers.ping) { markers.ping.remove(); markers.ping = null; } return; }
   if (!markers.ping) {
     markers.ping = L.circle(ping.pos, {
-      radius: 60, color: "#e03131", weight: 2, dashArray: "4 4", fillOpacity: 0.15,
+      radius: 60, color: "#e03131", weight: 3, dashArray: "4 6", fillOpacity: 0.15,
       interactive: false,
     }).addTo(map);
   }
@@ -147,46 +166,78 @@ function renderPing(ping) {
 }
 
 function renderPlayer(p) {
-  const cls = `player-dot${p.state === "ride" ? " ride" : ""}`;
+  const moving = keys.up || keys.down || keys.left || keys.right;
+  const state = p.state === "walk" && !moving ? "idle" : p.state;
+  const face = { held: "😬", wait: "🧍", idle: "🧍" }[state] || "🏃";
+  const cls = `toon player ${state}`;
   if (!markers.player) {
-    markers.player = divMarker(p.pos, `<div class="${cls}"></div>`, "", [26, 26]);
+    markers.player = divMarker(p.pos, `<div class="${cls}">${face}</div>`, "", [34, 34]);
     markers.player.setZIndexOffset(1000);
   }
   markers.player.setLatLng(p.pos);
-  markers.player.getElement().firstChild.className = cls;
+  const el = markers.player.getElement().firstChild;
+  el.className = cls;
+  if (el.textContent !== face) el.textContent = face;
+}
+
+function setChip(id, value) {
+  if (last[id] === value) return;
+  const el = $(id);
+  el.textContent = value;
+  if (last[id] !== null) {
+    const chip = el.parentElement;
+    chip.classList.remove("bump");
+    void chip.offsetWidth; // restart the animation
+    chip.classList.add("bump");
+  }
+  last[id] = value;
 }
 
 function renderHud(s) {
   $("clock").textContent = s.clock;
-  $("remaining").textContent = `${mmss(s.remaining_s / world.time_scale)} left`;
+  $("remaining").textContent = `⏳ ${mmss(s.remaining_s / world.time_scale)}`;
+  setChip("money", s.wallet.money);
+  setChip("tickets", s.wallet.tickets);
   const frac = 1 - s.next_ping_s / world.ping_every_s;
   $("ping-bar").style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
   $("ping-in").textContent = mmss(s.next_ping_s / world.time_scale);
-  const near = s.nearest_inspector_m;
-  $("nearest").textContent = `Nearest Inspector ${near >= 1000 ? (near / 1000).toFixed(1) + " km" : near + " m"}`;
-  $("nearest").className = near <= world.sight_radius_m * 2 ? "danger" : "muted";
+  const near = s.nearest_hunter_m;
+  $("nearest").textContent =
+    `Nearest Bounty Hunter ${near >= 1000 ? (near / 1000).toFixed(1) + " km" : near + " m"}`;
+  $("nearest").className = near <= world.sight_radius_m * 2 ? "danger" : "";
 
   let status;
+  let held = false;
   if (s.ride) {
     const r = s.ride;
-    status = `Riding <span class="pill ${r.mode}">${esc(r.route)}</span> → ${esc(r.headsign)}<br>` +
-      `<span class="muted">Next: ${esc(r.next_stop)}` +
-      (r.alight_at ? ` · getting off at ${esc(r.alight_at)}` : " · E to get off") + "</span>";
+    const ticket = r.fined ? " · 🚨 fined" : r.ticket ? " · 🎫 valid" : " · 🙈 no ticket";
+    status = `Riding ${pill(r.mode, r.route)} → ${esc(r.headsign)}<br>` +
+      `<span class="muted">Next: ${esc(r.next_stop)}${ticket}` +
+      (r.alight_at ? ` · off at ${esc(r.alight_at)}` : " · E to get off") + "</span>";
+  } else if (s.held_s !== null) {
+    held = true;
+    status = `📝 The inspectors are writing your fine… ` +
+      `<b>${mmss(s.held_s / world.time_scale)}</b><br>` +
+      `<span class="muted">${world.fine_ft} Ft, and the Bounty Hunters know where you are!</span>`;
   } else if (s.waiting) {
     status = `Waiting for ${esc(s.waiting.route)} → ${esc(s.waiting.headsign)} ` +
-      `<span class="muted">(${mmss(s.waiting.in_s / world.time_scale)}, E to cancel)</span>`;
+      `<span class="muted">(${mmss(s.waiting.in_s / world.time_scale)}, E to cancel)</span>` +
+      (s.wallet.tickets ? "" : '<br><span class="danger">No ticket: risky!</span>');
   } else {
     status = "On foot" + (s.stop ? "" : ' <span class="muted">· walk to a stop to ride</span>');
   }
   $("status").innerHTML = status;
+  $("status").className = held ? "status held" : "status";
 
   if (!s.stop) { $("stop").innerHTML = ""; return; }
   const rows = s.stop.departures.map((d, i) =>
     `<div class="dep${d.waiting ? " waiting" : ""}"><span class="key">${i + 1}</span>` +
-    `<span class="pill ${d.mode}">${esc(d.route)}</span>` +
+    pill(d.mode, d.route) +
     `<span class="headsign">${esc(d.headsign)}</span>` +
     `<span class="in">${d.in_s <= 0 ? "now" : mmss(d.in_s / world.time_scale)}</span></div>`);
-  $("stop").innerHTML = `<h3>${esc(s.stop.name)}</h3>` +
+  $("stop").innerHTML =
+    `<h3><span>🚏 ${esc(s.stop.name)}</span>` +
+    `<span class="chip" id="buy">T · 🎫 ${world.ticket_price_ft} Ft</span></h3>` +
     (rows.length ? rows.join("") : '<div class="muted">No departures soon.</div>');
 }
 
@@ -199,20 +250,31 @@ function toast(kind, text) {
   while ($("feed").children.length > 5) $("feed").lastChild.remove();
 }
 
+function burst(kind) {
+  $("burst-text").textContent = kind === "good" ? "Ticket OK! 🎫" : "KONTROLL! 🚨";
+  $("burst").className = kind;
+  $("burst").hidden = false;
+  clearTimeout(burstTimer);
+  burstTimer = setTimeout(() => { $("burst").hidden = true; }, 1600);
+}
+
 function showResult(s) {
   const won = s.status === "escaped";
+  $("result-emoji").textContent = won ? "🎉" : "🚨";
   $("result-title").textContent = won ? "You escaped!" : "Caught!";
   $("result-text").textContent = won
-    ? "You stayed hidden until the Inspectors gave up."
-    : (s.message || "An Inspector caught you.");
+    ? `You gave the Bounty Hunters the slip with ${s.wallet.money} Ft left in your pocket.`
+    : (s.message || "A Bounty Hunter caught you.");
   $("result-stats").textContent =
-    `Time ${s.clock} · walked ${s.stats.walked_m} m · ${s.stats.rides} rides`;
+    `${s.clock} · ${s.stats.rides} rides · ${s.stats.tickets_bought} tickets · ` +
+    `${s.stats.fines} fines · walked ${s.stats.walked_m} m`;
   $("overlay").hidden = false;
 }
 
 function restart() {
   for (const m of markers.vehicles.values()) m.remove();
   markers.vehicles.clear();
+  last.money = last.tickets = null;
   setFollow(true);
   send({ type: "restart" });
 }
@@ -232,6 +294,7 @@ window.addEventListener("keydown", (ev) => {
   if (ev.repeat) return;
   if (ev.code === "KeyE" || ev.code === "Space") { ev.preventDefault(); send({ type: "use" }); }
   else if (/^Digit[1-6]$/.test(ev.code)) send({ type: "wait", index: Number(ev.code.slice(5)) - 1 });
+  else if (ev.code === "KeyT") send({ type: "ticket" });
   else if (ev.code === "KeyF") setFollow(true);
   else if (ev.code === "KeyR") restart();
 });
@@ -246,6 +309,10 @@ window.addEventListener("blur", () => {
   sendKeys();
 });
 
+// The stop panel is redrawn every snapshot, so a click (down and up on one element) can miss.
+$("stop").addEventListener("pointerdown", (ev) => {
+  if (ev.target.closest("#buy")) send({ type: "ticket" });
+});
 $("again").addEventListener("click", restart);
 $("follow").addEventListener("click", () => setFollow(true));
 

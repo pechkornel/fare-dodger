@@ -8,6 +8,7 @@ Client messages::
 
     {"type": "keys", "up": bool, "down": bool, "left": bool, "right": bool}
     {"type": "use"}                 # board / get off / stop waiting
+    {"type": "ticket"}              # buy a ticket at the current stop
     {"type": "wait", "index": int}  # wait for a listed departure
     {"type": "restart"}
 """
@@ -44,6 +45,8 @@ def apply_message(game: LiveGame, msg: dict[str, Any]) -> None:
         )
     elif kind == "use":
         game.use()
+    elif kind == "ticket":
+        game.buy_ticket()
     elif kind == "wait":
         index = msg.get("index")
         if isinstance(index, int):

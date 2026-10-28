@@ -25,14 +25,22 @@ vertices = [
 start_time = "08:00"
 duration_minutes = 30
 time_scale = 10.0            # timetable seconds per real second (30 min = 3 real minutes)
-ping_every_s = 180           # the Inspectors learn the Dodger's position this often
-n_inspectors = 3
+ping_every_s = 180           # the Bounty Hunters learn the Dodger's position this often
+n_hunters = 3
 walk_speed_kmh = 5.0
-catch_radius_m = 25.0        # Inspector on foot this close to an exposed Dodger
-sight_radius_m = 100.0       # Inspectors on foot chase a Dodger on foot within this
+catch_radius_m = 25.0        # Bounty Hunter on foot this close to an exposed Dodger
+sight_radius_m = 100.0       # Bounty Hunters on foot chase a Dodger on foot within this
 board_radius_m = 40.0        # stand this close to a stop to wait for a vehicle
 min_start_distance_min = 8
+# Tickets and fares. Buy a ticket at a stop (T), or ride without one and risk an inspection.
+start_money_ft = 2000
+ticket_price_ft = 450
+inspected_share = 0.35       # trips with ticket inspectors aboard (hidden until you board)
+fine_ft = 1000               # caught without a ticket; game over if you cannot pay
+fine_hold_s = 60             # held at the next stop while the fine is processed
+fine_alerts_hunters = true   # the inspectors report you to the Bounty Hunters
 # OpenStreetMap's tile servers are fine for local play; use another tile provider for any
-# public deployment (https://operations.osmfoundation.org/policies/tiles/).
+# public deployment (https://operations.osmfoundation.org/policies/tiles/). The client tints
+# the tiles for the cartoon look.
 tile_url = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 tile_attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
