@@ -199,8 +199,11 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
   catches only on the same vehicle or with both on foot (`feat/live-streets`, ADR 0007).
 - ✅ Smooth route lines: vehicles stop at their platforms on the shape, no spikes into station
   centres, cleaned-up shapes (`feat/live-smooth-lines`, ADR 0005 addendum).
-- Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and polish
-  the graphics (the owner wants more). Multiplayer is further away.
+- ✅ Toy-town graphics: flat cartoon vector map zoomed out, a tilted 3D rounded-cube town
+  zoomed in (`feat/toon-3d`, ADR 0008).
+- ✅ Graphics combined with street walking and smooth lines (`feat/live-toon`).
+- Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and keep
+  polishing the graphics. Multiplayer is further away.
 
 ### Next (phase 1 follow-ups)
 1. Decide whether to adopt the suggested v1 rules (`reveal_modes = true`, `reveal_every = 2`)
