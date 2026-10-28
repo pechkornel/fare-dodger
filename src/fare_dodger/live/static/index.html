@@ -3,40 +3,51 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fare Dodger Live</title>
+  <title>Bliccelő · Fare Dodger</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="map"></div>
 
   <div id="hud" class="panel">
+    <div class="logo">Bliccelő <span>fare dodger</span></div>
     <div class="clock-row">
       <span id="clock">--:--:--</span>
-      <span id="remaining" class="muted"></span>
+      <span id="remaining" class="chip"></span>
+    </div>
+    <div class="wallet">
+      <span class="chip money">💰 <b id="money">0</b> Ft</span>
+      <span class="chip tickets">🎫 <b id="tickets">0</b></span>
     </div>
     <div class="ping-row">
-      <span class="muted">Next ping</span>
+      <span>🤠 radar</span>
       <div class="bar"><div id="ping-bar"></div></div>
-      <span id="ping-in" class="muted"></span>
+      <span id="ping-in"></span>
     </div>
-    <div id="nearest" class="muted"></div>
+    <div id="nearest"></div>
     <div id="status" class="status"></div>
     <div id="stop" class="stop"></div>
   </div>
 
   <div id="feed"></div>
+  <div id="burst" hidden><span id="burst-text"></span></div>
 
   <div id="help" class="panel">
-    <b>WASD</b>/arrows walk · <b>E</b> wait for next / get off · <b>1–6</b> wait for a departure ·
-    <b>F</b> follow · <b>R</b> new game
+    <b>WASD</b> walk · <b>E</b> wait / get off · <b>1–6</b> pick a departure ·
+    <b>T</b> buy ticket · <b>F</b> follow · <b>R</b> new game
   </div>
 
   <button id="follow" class="panel" type="button" hidden>Follow me (F)</button>
 
   <div id="overlay" hidden>
     <div class="panel card">
+      <div id="result-emoji" class="big-emoji"></div>
       <h1 id="result-title"></h1>
       <p id="result-text"></p>
       <p id="result-stats" class="muted"></p>

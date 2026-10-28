@@ -44,12 +44,19 @@ uv run fare-dodger sim --dodger greedy --inspectors belief --rule reveal_modes=t
 uv run fare-dodger play --open         # http://127.0.0.1:8000/ (uses configs/live.toml)
 ```
 
-A real-time version on an inner-Pest district (VII–VIII), drawn on OpenStreetMap tiles. You
-are the Dodger: walk with **WASD**, stand at a stop and press **E** (or **1–6** to pick a
-departure) to wait for a real tram, trolleybus, bus or metro, and press **E** again to get off
-at the next stop. Three bot Inspectors learn your position every 3 timetable minutes, chase
-you on sight, and catch you on foot, at a stop, or on the same vehicle. Survive 30 timetable
-minutes (3 real minutes at 10× speed) to win. See
+A fast, cartoony real-time version on an inner-Pest district (VII–VIII), drawn on
+OpenStreetMap tiles. You are the Dodger, and three **Bounty Hunters** are after you.
+- Walk with **WASD**. Stand at a stop and press **E** (or **1–6** to pick a departure) to wait
+  for a real tram, trolleybus, bus or metro. Press **E** again to get off at the next stop.
+- Fares: buy a ticket at a stop with **T** (450 Ft of your 2,000 Ft), or *bliccel* and ride
+  without one. Ticket inspectors ride about 35% of the trips, and you only find out once you
+  are aboard. Without a ticket you are put off at the next stop and held while the fine is
+  written, and the inspectors tell the Bounty Hunters where you are. If you can't pay the
+  fine, you lose.
+- The Bounty Hunters learn your position every 3 timetable minutes, chase you on sight, and
+  catch you on foot, at a stop, or on the same vehicle.
+
+Survive 30 timetable minutes (3 real minutes at 10× speed) to win. See
 [ADR 0005](docs/decisions/0005-live-prototype.md).
 
 Every command takes `-c configs/default.toml`, which documents every network and rule
