@@ -202,6 +202,8 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
 - ✅ Toy-town graphics: flat cartoon vector map zoomed out, a tilted 3D rounded-cube town
   zoomed in (`feat/toon-3d`, ADR 0008).
 - ✅ Graphics combined with street walking and smooth lines (`feat/live-toon`).
+- ✅ Riders inside vehicles, articulated vehicles with suspension, faster zoom, and coffee at
+  real cafés for a speed boost (`feat/live-motion`, ADR 0008 addendum, ADR 0009).
 - Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and keep
   polishing the graphics. Multiplayer is further away.
 

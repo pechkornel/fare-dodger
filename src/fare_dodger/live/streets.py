@@ -22,6 +22,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -29,6 +30,12 @@ from fare_dodger.config import Area, BBoxArea, CircleArea
 from fare_dodger.geo import metres_per_degree
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+#: Public Overpass instances, tried in order when one is down or overloaded.
+OVERPASS_MIRRORS = (
+    OVERPASS_URL,
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+)
 USER_AGENT = "fare-dodger (https://github.com/pechkornel/fare-dodger)"
 _EXCLUDED = (
     "motorway|motorway_link|construction|proposed|bus_guideway|raceway|elevator|platform|"
@@ -60,14 +67,24 @@ def overpass_query(bbox: BBox) -> str:
     )
 
 
+def overpass(query: str, client: httpx.Client) -> dict[str, Any]:
+    """Run an Overpass query, trying each mirror until one answers."""
+    error: httpx.HTTPError | None = None
+    for url in OVERPASS_MIRRORS:
+        try:
+            response = client.post(url, data={"data": query}, headers={"User-Agent": USER_AGENT})
+            response.raise_for_status()
+            result: dict[str, Any] = response.json()
+            return result
+        except httpx.HTTPError as exc:
+            error = exc
+    assert error is not None
+    raise error
+
+
 def download_streets(path: Path, bbox: BBox, client: httpx.Client | None = None) -> Path:
     """Fetch the walkable ways in ``bbox`` from Overpass into ``path`` (JSON)."""
-    http = client or httpx.Client(timeout=httpx.Timeout(300.0))
-    response = http.post(
-        OVERPASS_URL, data={"data": overpass_query(bbox)}, headers={"User-Agent": USER_AGENT}
-    )
-    response.raise_for_status()
-    data = response.json()
+    data = overpass(overpass_query(bbox), client or httpx.Client(timeout=httpx.Timeout(300.0)))
     payload = {"version": STREETS_VERSION, "bbox": list(bbox), "elements": data["elements"]}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".part")

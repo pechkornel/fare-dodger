@@ -53,6 +53,11 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 #clock { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .wallet { display: flex; gap: 6px; margin: 6px 0; }
 .chip.money { background: var(--sun); }
+.chip.boost { background: #e9c9a6; animation: wobble 0.6s ease-in-out infinite; }
+.chip.boost[hidden] { display: none; }
+.cafe-sign { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  background: #f1d3b3; border: 3px solid var(--ink); box-shadow: 2px 2px 0 var(--ink);
+  font-size: 16px; cursor: default; }
 .chip.bump { animation: bump 0.4s ease-out; }
 .ping-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; font-size: 13px;
   font-weight: 600; }
@@ -132,6 +137,7 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 .toast.ping, .toast.end { background: #ffe3e3; }
 .toast.board, .toast.alight { background: #d3f9d8; }
 .toast.ticket { background: #fff3bf; }
+.toast.coffee { background: #f1d3b3; }
 .toast.inspection, .toast.fine { background: #e5dbff; }
 @keyframes fade { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
 
