@@ -132,19 +132,20 @@ def test_hunter_on_foot_catches_nearby_dodger(world: World) -> None:
     assert game.status is Status.CAUGHT
 
 
-def test_riding_past_an_hunter_is_safe_but_stopping_is_not(world: World) -> None:
-    game = solo_game(world, "West")
-    west, central = world.node_xy[node(world, "West")], world.node_xy[node(world, "Central")]
-    mid = ((west[0] + central[0]) / 2, (west[1] + central[1]) / 2)
-    watcher = Agent(node(world, "West"), mid, node(world, "West"), needs_replan=False)
-    watcher.idle_until = 1e9  # stands still beside the track
-    game.hunters.agents = [watcher]
-    game.wait_for(0)
-    game.step(90)  # rides straight past the Bounty Hunter halfway to Central
-    assert game.status.value == "running"
-    watcher.pos = central
-    game.step(60)  # the train stands at Central next to the Bounty Hunter
-    assert game.status.value == "caught"
+def test_hunters_on_foot_catch_only_a_dodger_on_foot(world: World) -> None:
+    central = world.node_xy[node(world, "Central")]
+    for get_off in (False, True):
+        game = solo_game(world, "West")
+        watcher = Agent(node(world, "Central"), central, node(world, "Central"))
+        watcher.needs_replan, watcher.idle_until = False, 1e9  # stands at Central
+        game.hunters.agents = [watcher]
+        game.wait_for(0)
+        game.step(90)  # riding towards Central
+        if get_off:
+            game.use()
+        game.step(40)  # the train stops at Central at 08:02, next to the Bounty Hunter
+        expected = Status.CAUGHT if get_off else Status.RUNNING
+        assert game.status is expected
 
 
 def test_hunter_on_the_same_trip_catches(world: World) -> None:
