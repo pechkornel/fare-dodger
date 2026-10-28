@@ -285,6 +285,38 @@ function drawStatic(w) {
 }
 
 let cafeMarkers = [];
+const parcels = { markers: [], goal: null };
+
+function renderParcels(s) {
+  const list = s.packages || [];
+  while (parcels.markers.length > list.length) parcels.markers.pop().remove();
+  list.forEach((pos, i) => {
+    if (!parcels.markers[i]) {
+      const el = document.createElement("div");
+      el.className = "parcel-sign";
+      el.title = "A package: walk here and press E";
+      el.textContent = "📦";
+      parcels.markers[i] = new maplibregl.Marker({ element: el }).setLngLat(lngLat(pos)).addTo(map);
+    }
+    parcels.markers[i].setLngLat(lngLat(pos));
+    showIfOnScreen(parcels.markers[i], pos);
+  });
+  if (s.delivery) {
+    if (!parcels.goal) {
+      const el = document.createElement("div");
+      el.className = "goal-sign";
+      el.textContent = "🏁";
+      parcels.goal = new maplibregl.Marker({ element: el }).setLngLat(lngLat(s.delivery.pos))
+        .addTo(map);
+    }
+    parcels.goal.setLngLat(lngLat(s.delivery.pos));
+    showIfOnScreen(parcels.goal, s.delivery.pos);
+    parcels.goal.getElement().title = `Deliver here (near ${s.delivery.near})`;
+  } else if (parcels.goal) {
+    parcels.goal.remove();
+    parcels.goal = null;
+  }
+}
 
 /** Ring of [lon, lat] approximating a circle of ``radius`` metres. */
 function circle([lat, lon], radius) {
@@ -307,6 +339,9 @@ function clearDynamic() {
     if (markers[key]) { markers[key].remove(); markers[key] = null; }
   }
   last.money = last.tickets = null;
+  for (const m of parcels.markers) m.remove();
+  parcels.markers = [];
+  if (parcels.goal) { parcels.goal.remove(); parcels.goal = null; }
 }
 
 function connect(hello) {
@@ -383,6 +418,7 @@ function render(s) {
   renderToggle(s);
   drawMinimap(s);
   renderPingArrow(s);
+  renderParcels(s);
   cam.target = s.player.pos;
   if (match.round_over && shownRound !== match.round) showResult(s, match);
   if (match.round_over && s.room && s.room.next_round_in !== null && !s.room.host) {
@@ -552,12 +588,23 @@ function renderHud(s) {
   $("status").innerHTML = status;
   $("status").className = held ? "status held" : "status";
 
-  const cafe = coffee.cafe && coffee.brewing_s == null
+  let parcel = "";
+  if (s.delivery) {
+    const d = s.delivery;
+    const far = d.distance_m >= 1000 ? `${(d.distance_m / 1000).toFixed(1)} km` : `${d.distance_m} m`;
+    parcel = `<div class="parcel-row">📦 Deliver near <b>${esc(d.near)}</b> · ${far} · ` +
+      `+${d.reward} Ft</div>`;
+  } else if (s.package_here) {
+    parcel = `<h3><span>📦 A package</span><span class="chip" id="take-parcel">E · ` +
+      `+${world.package_reward_ft} Ft</span></h3>` +
+      '<div class="muted">Take it and deliver it to earn money.</div>';
+  }
+  const cafe = parcel + (coffee.cafe && coffee.brewing_s == null
     ? `<h3><span>☕ ${esc(coffee.cafe)}</span>` +
       `<span class="chip" id="coffee">C · ☕ ${world.coffee_price_ft} Ft</span></h3>` +
       `<div class="muted">Runs you almost bus-fast for ` +
       `${mmss(world.coffee_boost_s / world.time_scale)}.</div>`
-    : "";
+    : "");
   if (!s.stop) { $("stop").innerHTML = cafe; return; }
   const rows = s.stop.departures.map((d, i) =>
     `<div class="dep${d.waiting ? " waiting" : ""}"><span class="key">${i + 1}</span>` +
@@ -696,6 +743,7 @@ window.addEventListener("blur", () => {
 $("stop").addEventListener("pointerdown", (ev) => {
   if (ev.target.closest("#buy")) send({ type: "ticket" });
   if (ev.target.closest("#coffee")) send({ type: "coffee" });
+  if (ev.target.closest("#take-parcel")) send({ type: "use" });
 });
 $("again").addEventListener("click", () => {
   if ($("again").dataset.action === "restart") restart();
@@ -900,6 +948,8 @@ function drawMinimap(s) {
     for (const d of s.dodgers) if (!d.caught) miniDot(c, d.pos, "#ffd43b", 5);
     miniDot(c, s.player.pos, "#fa5252", 5.5, "#fff");
   } else {
+    for (const pos of s.packages || []) miniDot(c, pos, "#ffd43b", 3.5);
+    if (s.delivery) miniDot(c, s.delivery.pos, "#2f9e44", 5, "#fff");
     // The Dodgers' map shows their own team, never the Bounty Hunters.
     for (const d of s.dodgers) miniDot(c, d.pos, d.caught ? "#adb5bd" : "#8ce99a", 4);
     miniDot(c, s.player.pos, "#40c057", 5.5, "#fff");
@@ -914,32 +964,64 @@ function metresBetween([lat1, lon1], [lat2, lon2]) {
 }
 
 function renderPingArrow(s) {
-  const el = $("ping-arrow");
-  if (s.role !== "hunter" || !s.ping || s.status !== "running") { el.hidden = true; return; }
+  const show = s.role === "hunter" && s.ping && s.status === "running";
+  edgeArrow($("ping-arrow"), $("ping-pointer"), $("ping-dist"), show ? s.ping.pos : null, s);
+  const goal = s.delivery && s.status === "running" ? s.delivery.pos : null;
+  edgeArrow($("goal-arrow"), $("goal-pointer"), $("goal-dist"), goal, s);
+}
+
+// Zoomed in and tilted, a far point can lie beyond the horizon, where project() returns
+// nonsense: projecting back and comparing tells whether it really is in view.
+function inView(pos, margin = 0) {
   const box = map.getContainer().getBoundingClientRect();
-  const p = map.project(lngLat(s.ping.pos));
+  const p = map.project(lngLat(pos));
+  if (p.x < margin || p.y < margin || p.x > box.width - margin || p.y > box.height - margin) {
+    return false;
+  }
+  const back = map.unproject(p);
+  return metresBetween([back.lat, back.lng], pos) < 25;
+}
+
+function showIfOnScreen(marker, pos) {
+  marker.getElement().style.visibility = inView(pos) ? "" : "hidden";
+}
+
+// An arrow at the screen edge pointing at ``target`` (lat, lon) when it is off screen.
+function edgeArrow(el, pointer, label, target, s) {
+  if (!target) { el.hidden = true; return; }
+  const box = map.getContainer().getBoundingClientRect();
   // The frame the arrow runs along: clear of the top bar and the bottom controls.
   const left = 60;
   const right = box.width - 60;
   const top = 110;
   const bottom = box.height - 120;
-  const inside = p.x > left && p.x < right && p.y > top && p.y < bottom;
-  const cx = box.width / 2;
-  const cy = box.height / 2;
-  const dx = p.x - cx;
-  const dy = p.y - cy;
-  if (inside || !Number.isFinite(dx) || !Number.isFinite(dy) || (!dx && !dy)) {
-    el.hidden = true;
-    return;
-  }
-  const tx = dx > 0 ? (right - cx) / dx : dx < 0 ? (left - cx) / dx : Infinity;
-  const ty = dy > 0 ? (bottom - cy) / dy : dy < 0 ? (top - cy) / dy : Infinity;
+  // On screen? Zoomed in and tilted, a far point can lie beyond the horizon, where
+  // project() returns nonsense; projecting back and comparing catches that.
+  const p = map.project(lngLat(target));
+  const back = map.unproject(p);
+  const onScreen = p.x > left && p.x < right && p.y > top && p.y < bottom &&
+    metresBetween([back.lat, back.lng], target) < 25;
+  if (onScreen) { el.hidden = true; return; }
+  // The direction from you to the target, turned with the map (not from the projection).
+  const from = s.player.pos;
+  const k = Math.cos((from[0] * Math.PI) / 180);
+  const east = (target[1] - from[1]) * 111320 * k;
+  const north = (target[0] - from[0]) * 111320;
+  const b = (map.getBearing() * Math.PI) / 180;
+  const sx = east * Math.cos(b) - north * Math.sin(b);
+  const sy = -(east * Math.sin(b) + north * Math.cos(b)); // screen y grows downwards
+  if (!sx && !sy) { el.hidden = true; return; }
+  const me = map.project(lngLat(from));
+  const cx = Math.min(right - 1, Math.max(left + 1, me.x));
+  const cy = Math.min(bottom - 1, Math.max(top + 1, me.y));
+  const tx = sx > 0 ? (right - cx) / sx : sx < 0 ? (left - cx) / sx : Infinity;
+  const ty = sy > 0 ? (bottom - cy) / sy : sy < 0 ? (top - cy) / sy : Infinity;
   const t = Math.min(tx, ty);
-  el.style.left = `${cx + dx * t}px`;
-  el.style.top = `${cy + dy * t}px`;
-  $("ping-pointer").style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
-  const m = metresBetween(s.player.pos, s.ping.pos);
-  $("ping-dist").textContent = m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+  el.style.left = `${cx + sx * t}px`;
+  el.style.top = `${cy + sy * t}px`;
+  pointer.style.transform = `rotate(${Math.atan2(sy, sx)}rad)`;
+  const m = metresBetween(from, target);
+  label.textContent = m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
   el.hidden = false;
 }
 

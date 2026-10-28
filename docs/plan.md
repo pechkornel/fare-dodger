@@ -218,6 +218,8 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
 - ✅ After the first online test: walking anywhere except through buildings (OpenStreetMap
   footprints), screen-relative WASD with diagonals, and a map turned by right-drag
   (`feat/free-walking`, ADR 0012).
+- ✅ Packages to earn money (Dodgers start with 1,000 Ft), per-player round results, edge
+  arrows that stay right when zoomed in (`feat/packages`, ADR 0013).
 - Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and keep
   polishing the graphics. Multiplayer is further away.
 

@@ -68,8 +68,12 @@ teams, CS-style.
   departure) to wait for a real tram, trolleybus, bus or metro. Press **E** again to get off at
   the next stop. Press **E** again (or click the switch, bottom right: blue on board, red getting
   off) to stay on. **Enter** starts the next round.
-- **As the Dodger:** survive. Buy a ticket at a stop with **T** (450 Ft of your 2,000 Ft), or
-  *bliccel* and ride without one.
+- **As the Dodger:** survive. You start with 1,000 Ft. Buy a ticket at a stop with **T**
+  (450 Ft), or *bliccel* and ride without one.
+  - Earn money with packages: 📦 boxes wait around the district (only the Dodgers see them).
+    Walk to one and press **E** to take it; a 🏁 flag (with an arrow when it is off screen)
+    shows where to deliver it, 600–1,600 m away, for 1,200 Ft. Get caught and the package is
+    lost.
   - Real cafés (☕ on the map) sell coffee with **C**: 500 Ft and 3 seconds standing still,
     then 20 seconds running almost as fast as a bus.
   - Ticket inspectors ride about 35% of the trips, and you only find out once you are aboard.
@@ -89,7 +93,8 @@ See [ADR 0005](docs/decisions/0005-live-prototype.md),
 [ADR 0008](docs/decisions/0008-toy-town-graphics.md),
 [ADR 0009](docs/decisions/0009-coffee.md),
 [ADR 0010](docs/decisions/0010-menu-minimap-parks.md),
-[ADR 0012](docs/decisions/0012-free-walking-and-rotation.md) and
+[ADR 0012](docs/decisions/0012-free-walking-and-rotation.md),
+[ADR 0013](docs/decisions/0013-packages.md) and
 [ADR 0011](docs/decisions/0011-online-and-deployment.md).
 
 Every command takes `-c configs/default.toml`, which documents every network and rule

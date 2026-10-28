@@ -134,6 +134,17 @@ class Seat:
 
 
 @dataclass
+class Package:
+    """A parcel waiting to be picked up, or carried to ``dest`` by a Dodger."""
+
+    pos: Point
+    reward: int
+    dest: Point | None = None
+    #: The station nearest the destination, to name it.
+    near: str = ""
+
+
+@dataclass
 class Runner:
     """A Dodger in the round."""
 
@@ -143,6 +154,13 @@ class Runner:
     player: str | None = None
     bot: BotDodger | None = None
     caught: bool = False
+    #: How they were caught: by whom (a human's id; ``None`` for a bot), on which route, or
+    #: by the ticket inspectors.
+    catcher: str | None = None
+    route: str | None = None
+    by_inspectors: bool = False
+    package: Package | None = None
+    deliveries: int = 0
 
 
 @dataclass
@@ -200,6 +218,8 @@ class LiveGame:
         )
         self.humans: dict[str, Human] = {}
         self.runners: list[Runner] = []
+        self._parcels = random.Random(f"{seed}:packages")
+        self.packages: list[Package] = []
         for i, (seat, node) in enumerate(zip(runners, runner_nodes, strict=True)):
             runner = Runner(
                 i, seat.name, Traveller(xy[node], money=cfg.start_money_ft), seat.player
@@ -218,6 +238,8 @@ class LiveGame:
             )
         self.hunters = BountyHunters(world, cfg, hunter_nodes[len(human_hunters) :], rng)
         self.default_player = next(iter(self.humans), None)
+        for _ in range(cfg.packages_waiting):
+            self._add_package()
         for pid, human in self.humans.items():
             here = names[world.nearest_node(human.traveller.pos) or 0]
             if human.role is Role.DODGER:
@@ -326,6 +348,61 @@ class LiveGame:
         events, human.events = human.events, []
         return events
 
+    # --- packages (the Dodgers' side job) ---------------------------------------------------
+
+    def _add_package(self) -> None:
+        spot = self.world.random_spot(self._parcels)
+        if spot is not None:
+            self.packages.append(Package(spot, self.cfg.package_reward_ft))
+
+    def package_near(self, who: Traveller) -> Package | None:
+        """A waiting package within reach of ``who`` (on foot), if any."""
+        if who.ride is not None or who.held_until is not None:
+            return None
+        reach = self.cfg.package_radius_m
+        return next((pkg for pkg in self.packages if distance(pkg.pos, who.pos) <= reach), None)
+
+    def _accept_package(self, runner: Runner, pkg: Package) -> None:
+        """``runner`` takes ``pkg``: it gets a destination, and a new package appears."""
+        cfg, world = self.cfg, self.world
+        best: Point | None = None
+        for _ in range(40):
+            spot = world.random_spot(self._parcels)
+            if spot is None:
+                continue
+            gap = distance(spot, pkg.pos)
+            if cfg.package_min_m <= gap <= cfg.package_max_m:
+                best = spot
+                break
+            if best is None or abs(gap - cfg.package_min_m) < abs(
+                distance(best, pkg.pos) - cfg.package_min_m
+            ):
+                best = spot
+        if best is None:
+            return
+        node = world.nearest_node(best)
+        pkg.dest = best
+        pkg.near = world.tt.node_name[node] if node is not None else "?"
+        self.packages.remove(pkg)
+        runner.package = pkg
+        self._add_package()
+        self._tell(
+            runner.traveller,
+            "package",
+            f"📦 Package accepted: take it near {pkg.near} for {pkg.reward} Ft.",
+        )
+
+    def _deliver(self) -> None:
+        for runner in self.in_play():
+            pkg, d = runner.package, runner.traveller
+            if pkg is None or pkg.dest is None or d.ride is not None:
+                continue
+            if distance(d.pos, pkg.dest) <= self.cfg.package_radius_m:
+                d.money += pkg.reward
+                runner.package = None
+                runner.deliveries += 1
+                self._tell(d, "package", f"📦 Delivered! +{pkg.reward} Ft.")
+
     # --- input (human players) -------------------------------------------------------------
 
     def set_keys(self, keys: Keys, pid: str | None = None) -> None:
@@ -422,6 +499,12 @@ class LiveGame:
         p, to = human.traveller, [self._pid(pid)]
         if p.held_until is not None or p.brewing_until is not None:
             return
+        runner = human.runner
+        if runner is not None and runner.package is None and p.waiting_for is None:
+            pkg = self.package_near(p)
+            if pkg is not None:
+                self._accept_package(runner, pkg)
+                return
         if p.ride is not None:
             if p.ride.fined:
                 self._emit("info", "The inspectors are taking you off at the next stop.", to)
@@ -515,22 +598,13 @@ class LiveGame:
         )
         if self.t >= self.next_ping:
             self._ping()
+        self._deliver()
         self._check_catch()
         if self.status is Status.RUNNING and self.t >= self.cfg.end_seconds:
             self.status = Status.ESCAPED
-            escaped = len(self.in_play())
-            if len(self.runners) == 1:
-                self._announce(
-                    "end",
-                    "You made it! The Bounty Hunters gave up.",
-                    "Time's up: the Dodger got away.",
-                )
-            else:
-                self._announce(
-                    "end",
-                    f"Time's up! {escaped} of {len(self.runners)} Dodgers got away.",
-                    f"Time's up: {escaped} of {len(self.runners)} Dodgers got away.",
-                )
+            for pid in self.humans:
+                self._emit("end", self.summary(pid), [pid])
+            self.caught_by = self.summary(self.default_player) if self.default_player else None
 
     def _move(
         self, who: Traveller, h: float, direction: Point | None, target: Point | None
@@ -626,12 +700,7 @@ class LiveGame:
             return
         runner = self._runner_of(d)
         if d.money < self.cfg.fine_ft and runner is not None:
-            self._catch(
-                runner,
-                to_runner=f"Ticket inspection! You can't pay the {self.cfg.fine_ft} Ft fine.",
-                to_others=f"Ticket inspectors caught {self._called(runner)}, who couldn't pay "
-                "the fine.",
-            )
+            self._catch(runner, inspectors=True)
             return
         ride.fined = True
         ride.alight_pos = dep.pos + 1
@@ -742,42 +811,81 @@ class LiveGame:
                 if not (same_trip or on_foot_close):
                     continue
                 route = self.world.route(trip) if same_trip and trip is not None else None
-                where = f" on the {route}" if route else ""
-                self._catch(
-                    runner,
-                    to_runner=(
-                        f"A Bounty Hunter was riding the {route} with you."
-                        if route
-                        else "A Bounty Hunter caught you."
-                    ),
-                    to_others=f"{'You' if pid else 'Your team'} caught {self._called(runner)}"
-                    f"{where}!",
-                    catcher=pid,
-                )
+                self._catch(runner, catcher=pid, route=route)
                 break
 
     def _catch(
-        self, runner: Runner, to_runner: str, to_others: str, catcher: str | None = None
+        self,
+        runner: Runner,
+        *,
+        catcher: str | None = None,
+        route: str | None = None,
+        inspectors: bool = False,
     ) -> None:
-        runner.caught = True
+        """``runner`` is out: caught by ``catcher`` (a human; ``None`` for a bot), on
+        ``route`` (same vehicle), or by the ticket inspectors. Their package is lost."""
+        runner.caught, runner.catcher, runner.route = True, catcher, route
+        runner.by_inspectors = inspectors
         runner.traveller.waiting_for = None
-        if runner.player is not None:
-            self._emit("end", to_runner, [runner.player])
+        runner.package = None
         for pid, human in self.humans.items():
             if pid == runner.player:
-                continue
-            if human.role is Role.DODGER:
+                self._emit("end", self._runner_line(runner), [pid])
+            elif human.role is Role.DODGER:
                 self._emit("ping", f"{runner.name} was caught!", [pid])
-            elif catcher is None or pid == catcher:
-                self._emit("end", to_others, [pid])
             else:
-                self._emit("end", f"Your team caught {self._called(runner)}!", [pid])
-        if len(self.runners) == 1 or runner.player == self.default_player:
-            self.caught_by = to_runner if self.as_dodger else to_others
+                self._emit("end", self._hunter_line(runner, pid), [pid])
         if not self.in_play():
             self.status = Status.CAUGHT
-            if self.caught_by is None:
-                self.caught_by = "Every Dodger was caught."
+            self.caught_by = (
+                self.summary(self.default_player)
+                if self.default_player
+                else "Every Dodger was caught."
+            )
+
+    def _runner_line(self, runner: Runner) -> str:
+        """How a caught Dodger hears about it."""
+        if runner.by_inspectors:
+            return f"Ticket inspection! You can't pay the {self.cfg.fine_ft} Ft fine."
+        if runner.route:
+            return f"A Bounty Hunter was riding the {runner.route} with you."
+        return "A Bounty Hunter caught you."
+
+    def _hunter_line(self, runner: Runner, pid: str) -> str:
+        """How a Bounty Hunter hears about a catch."""
+        called = self._called(runner)
+        if runner.by_inspectors:
+            return f"Ticket inspectors caught {called}, who couldn't pay the fine."
+        who = "You" if runner.catcher == pid else "Your team"
+        where = f" on the {runner.route}" if runner.route else ""
+        return f"{who} caught {called}{where}!"
+
+    def summary(self, pid: str) -> str:
+        """How the round went, told to one player (their own catches, their own escape)."""
+        human = self.humans[pid]
+        runner_side = human.role is Role.DODGER
+        if len(self.runners) == 1:
+            only = self.runners[0]
+            if runner_side:
+                return (
+                    self._runner_line(only)
+                    if only.caught
+                    else "You made it! The Bounty Hunters gave up."
+                )
+            if only.caught:
+                return self._hunter_line(only, pid)
+            return f"Time's up: {self._called(only)} got away."
+        lines = []
+        for runner in self.runners:
+            if runner is human.runner:
+                lines.append(self._runner_line(runner) if runner.caught else "You got away!")
+            elif runner_side:
+                lines.append(f"{runner.name} {'was caught' if runner.caught else 'got away'}.")
+            elif runner.caught:
+                lines.append(self._hunter_line(runner, pid))
+            else:
+                lines.append(f"{runner.name} got away.")
+        return " ".join(lines)
 
     def result(self) -> tuple[int, int]:
         """Points so far: (Dodgers still free, Dodgers caught). Final once the round is over."""
@@ -904,7 +1012,13 @@ class LiveGame:
             "status": self.status.value,
             "role": human.role.value,
             "won": self.won(pid),
-            "message": self.caught_by if pid == self.default_player else None,
+            "message": (
+                self.summary(pid)
+                if over
+                else self._runner_line(me)
+                if me is not None and me.caught
+                else None
+            ),
             "player": {"pos": self._latlon(p.pos), "state": state_name, "name": human.name},
             "wallet": {"money": p.money, "tickets": p.tickets} if p.pays_fares else None,
             "held_s": round(p.held_until - t) if p.held_until is not None else None,
@@ -961,6 +1075,23 @@ class LiveGame:
                 else None
             ),
             "seen": self.visible(me) if me is not None else self.dodger_visible(),
+            # Packages are the Dodgers' business: the Bounty Hunters never see them.
+            "packages": [self._latlon(pkg.pos) for pkg in self.packages] if as_runner else [],
+            "package_here": as_runner
+            and not out
+            and self.package_near(p) is not None
+            and me is not None
+            and me.package is None,
+            "delivery": (
+                {
+                    "pos": self._latlon(me.package.dest),
+                    "near": me.package.near,
+                    "reward": me.package.reward,
+                    "distance_m": round(distance(p.pos, me.package.dest)),
+                }
+                if me is not None and me.package is not None and me.package.dest is not None
+                else None
+            ),
             "runners": {
                 "total": len(self.runners),
                 "caught": sum(r.caught for r in self.runners),
@@ -971,6 +1102,7 @@ class LiveGame:
                 "tickets_bought": p.tickets_bought,
                 "fines": p.fines,
                 "money": p.money,
+                "deliveries": me.deliveries if me is not None else 0,
             },
             "events": [{"kind": e.kind, "text": e.text} for e in self.drain_events(pid)],
         }
@@ -1013,5 +1145,6 @@ def world_view(world: World, cfg: LiveConfig) -> dict[str, Any]:
             for c in world.cafes
         ],
         "coffee_price_ft": cfg.coffee_price_ft,
+        "package_reward_ft": cfg.package_reward_ft,
         "coffee_boost_s": cfg.coffee_boost_s,
     }
