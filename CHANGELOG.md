@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- RAPTOR router (ADR 0002): multi-source, mode mask, change times, journey reconstruction;
+  property-tested against a brute-force oracle. `fare-dodger reach` and `fare-dodger bench`.
 - Playable network build: area filter, frequency-based bus selection, station merging (ADR 0001),
   walking transfers, FIFO route patterns, largest strongly connected component, cached `.npz` timetable.
 - `fare-dodger build` and `fare-dodger info`; `configs/default.toml`.
