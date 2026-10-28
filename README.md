@@ -63,9 +63,11 @@ CS-style.
     and catch you on foot, at a stop, or on the same vehicle.
 - **As a Bounty Hunter:** hunt the bot Dodger with two bot teammates. You see the Dodger only
   up close or through the reports.
+- **Map:** zoom with the mouse wheel or **+/−**. Zoomed out, the map is flat. Zoomed in, it
+  tilts into a 3D toy town of rounded-cube houses, trams, buses and people.
 
 See [ADR 0005](docs/decisions/0005-live-prototype.md) and
-[ADR 0006](docs/decisions/0006-live-matches.md).
+[ADR 0006](docs/decisions/0006-live-matches.md) and [ADR 0007](docs/decisions/0007-toy-town-graphics.md).
 
 Every command takes `-c configs/default.toml`, which documents every network and rule
 setting. `--rule key=value` overrides a single rule for a simulation. The config pins the

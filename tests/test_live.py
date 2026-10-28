@@ -192,7 +192,7 @@ def test_server_serves_districts_and_streams_a_match(world: World) -> None:
     assert len(data["stations"]) == world.tt.n_nodes
     assert data["area"]["kind"] == "circle" and data["name"] == "Fixture"
     assert client.get("/api/world/1").status_code == 404
-    assert "leaflet" in client.get("/").text
+    assert "maplibre-gl" in client.get("/").text
     with client.websocket_connect("/ws") as ws:
         first = ws.receive_json()
         assert first["status"] == "running" and first["player"]["state"] == "walk"
