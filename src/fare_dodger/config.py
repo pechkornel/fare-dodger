@@ -11,7 +11,14 @@ from datetime import date
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    field_validator,
+    model_validator,
+)
 
 from fare_dodger.geo import distance_m, point_in_polygon
 from fare_dodger.modes import Mode
@@ -22,6 +29,15 @@ DATA_DIR_ENV = "FARE_DODGER_DATA_DIR"
 
 #: Deák Ferenc tér, where the three old metro lines meet.
 DEAK_TER = (47.4979, 19.0544)
+
+
+def _sorted_list(values: frozenset[Any]) -> list[Any]:
+    return sorted(values)
+
+
+#: Sets serialise as sorted lists so dumps (and cache keys) are stable across processes.
+ModeSet = Annotated[frozenset[Mode], PlainSerializer(_sorted_list, return_type=list[str])]
+NameSet = Annotated[frozenset[str], PlainSerializer(_sorted_list, return_type=list[str])]
 
 
 class _Frozen(BaseModel):
@@ -71,15 +87,17 @@ class NetworkConfig(_Frozen):
     window_start: str = "07:30"
     window_end: str = "11:30"
     area: Area = Field(default_factory=CircleArea)
-    modes: frozenset[Mode] = frozenset({Mode.METRO, Mode.TRAM, Mode.TROLLEYBUS, Mode.BUS})
+    modes: ModeSet = frozenset({Mode.METRO, Mode.TRAM, Mode.TROLLEYBUS, Mode.BUS})
     #: A bus route is kept only if, in the frequency window, its busiest in-area stop
     #: sees at least this many departures. Set to 0 to keep every bus route.
     bus_min_departures_per_hour: float = Field(default=6.0, ge=0)
     bus_frequency_window: tuple[str, str] = ("08:00", "09:00")
     #: Route short names always kept (if their mode is enabled) / always dropped.
-    include_routes: frozenset[str] = frozenset()
-    exclude_routes: frozenset[str] = frozenset()
+    include_routes: NameSet = frozenset()
+    exclude_routes: NameSet = frozenset()
     merge_radius_m: float = Field(default=150.0, ge=0)
+    #: Same-name radius when one platform is a metro/suburban-rail platform or has a parent.
+    station_merge_radius_m: float = Field(default=300.0, ge=0)
     walk_radius_m: float = Field(default=400.0, ge=0)
     walk_speed_kmh: float = Field(default=5.0, gt=0)
     #: Multiplier on straight-line distance to approximate street routes.
