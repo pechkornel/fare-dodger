@@ -64,7 +64,7 @@ function createMap(w) {
   map.on("zoom", (ev) => { if (ev.originalEvent) cam.zoom = map.getZoom(); }); // pinch
   map.getCanvasContainer().addEventListener("wheel", (ev) => {
     ev.preventDefault();
-    zoomBy(-ev.deltaY * (ev.deltaMode ? 0.05 : 0.0025));
+    zoomBy(-ev.deltaY * (ev.deltaMode ? 0.12 : 0.006));   // a wheel notch: about 0.6
   }, { passive: false });
   return new Promise((resolve) => map.on("load", () => {
     addOverlays();
@@ -82,7 +82,12 @@ function frame() {
   requestAnimationFrame(frame);
   if (!map || dragging) return;
   const z = map.getZoom();
-  const zoom = Math.abs(cam.zoom - z) < 0.002 ? cam.zoom : z + (cam.zoom - z) * 0.18;
+  const now = performance.now();
+  const dt = Math.min(0.1, (now - (cam.last || now)) / 1000);
+  cam.last = now;
+  // Ease quickly (about 90% of the way in a quarter of a second), independent of frame rate.
+  const ease = 1 - Math.exp(-dt * 10);
+  const zoom = Math.abs(cam.zoom - z) < 0.002 ? cam.zoom : z + (cam.zoom - z) * ease;
   const view = {};
   if (zoom !== z) view.zoom = zoom;
   const pitch = pitchForZoom(zoom);
@@ -495,8 +500,8 @@ window.addEventListener("keydown", (ev) => {
   else if (/^Digit[1-6]$/.test(ev.code)) send({ type: "wait", index: Number(ev.code.slice(5)) - 1 });
   else if (ev.code === "KeyT") send({ type: "ticket" });
   else if (ev.code === "KeyF") setFollow(true);
-  else if (ev.code === "Equal" || ev.code === "NumpadAdd") zoomBy(0.75);
-  else if (ev.code === "Minus" || ev.code === "NumpadSubtract") zoomBy(-0.75);
+  else if (ev.code === "Equal" || ev.code === "NumpadAdd") zoomBy(1);
+  else if (ev.code === "Minus" || ev.code === "NumpadSubtract") zoomBy(-1);
   else if (ev.code === "KeyR") restart();
 });
 
