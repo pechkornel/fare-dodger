@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+
+# Downloaded GTFS and built networks are never committed
+data/
+results/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

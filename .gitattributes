@@ -1,0 +1,8 @@
+# Normalise every text file to LF in the repository and in working trees,
+# so Windows and macOS checkouts behave identically.
+* text=auto eol=lf
+
+*.zip binary
+*.npz binary
+*.png binary
+*.jpg binary
