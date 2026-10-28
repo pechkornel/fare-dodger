@@ -6,7 +6,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-28
+
 ### Added
+- `docs/results.md`: bot matchups, rule-variant results on the pinned network, and
+  suggested rule changes (mode reveals + position reveal every 2nd round).
 - Manual station merges: `station_merge_overrides` in `NetworkConfig`, loaded from the file
   named by `[network] station_overrides` (`configs/station_overrides.toml` merges 12 split
   interchanges; the default network has 421 stations instead of 434). ADR 0001 addendum.
@@ -32,3 +36,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 - `configs/default.toml` pins `service_date = "2026-11-17"` so simulations are reproducible;
   a pinned date missing from the feed now gives an error saying how to fix it.
+
+[Unreleased]: https://github.com/pechkornel/fare-dodger/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/pechkornel/fare-dodger/releases/tag/v0.1.0
