@@ -17,41 +17,66 @@ const mmss = (s) => {
 };
 const pill = (mode, route) =>
   `<span class="pill ${mode}">${MODE_ICONS[mode] || ""}${esc(route)}</span>`;
+const ROLE_LABEL = { dodger: "🏃 Dodger", hunter: "🤠 Bounty Hunter" };
 
-let world = null;
+let world = null;        // static data of the district being played
+let district = -1;       // its index, or -1 before the first one is loaded
+let loading = false;
 let map = null;
+let staticLayer = null;
 let ws = null;
 let follow = true;
-let gameOver = false;
+let shownRound = null;   // round whose result overlay is showing
 let burstTimer = null;
+let match = null;
 const keys = { up: false, down: false, left: false, right: false };
 const last = { money: null, tickets: null };
 
-const markers = { vehicles: new Map(), hunters: [], sight: [], player: null, ping: null };
+const markers = {
+  vehicles: new Map(), hunters: [], sight: [], player: null, dodger: null, ping: null,
+};
 
-async function init() {
-  world = await (await fetch("api/world")).json();
+function init() {
   map = L.map("map", { keyboard: false, zoomControl: true, preferCanvas: true })
-    .setView(world.center, 16);
-  L.tileLayer(world.tiles.url, { maxZoom: 19, attribution: world.tiles.attribution }).addTo(map);
-  drawArea(world.area);
-  for (const line of world.lines) {
-    L.polyline(line.path, {
-      color: INK, weight: 8, opacity: 0.18, lineCap: "round", lineJoin: "round",
-      interactive: false,
-    }).addTo(map);
-    L.polyline(line.path, {
-      color: MODE_COLORS[line.mode] || "#888", weight: 5, opacity: 0.7, lineCap: "round",
-      lineJoin: "round", interactive: false,
-    }).addTo(map);
-  }
-  for (const st of world.stations) {
-    L.circleMarker(st.pos, {
-      radius: 5, color: INK, weight: 3, fillColor: "#fff", fillOpacity: 1,
-    }).bindTooltip(esc(st.name), { direction: "top", offset: [0, -6] }).addTo(map);
-  }
+    .setView([47.4979, 19.0402], 14);
+  staticLayer = L.layerGroup().addTo(map);
   map.on("dragstart", () => setFollow(false));
   connect();
+}
+
+async function loadDistrict(index) {
+  loading = true;
+  try {
+    const next = await (await fetch(`api/world/${index}`)).json();
+    if (!world) {
+      L.tileLayer(next.tiles.url, { maxZoom: 19, attribution: next.tiles.attribution })
+        .addTo(map);
+    }
+    world = next;
+    district = index;
+    clearDynamic();
+    staticLayer.clearLayers();
+    drawArea(world.area);
+    for (const line of world.lines) {
+      L.polyline(line.path, {
+        color: INK, weight: 8, opacity: 0.18, lineCap: "round", lineJoin: "round",
+        interactive: false,
+      }).addTo(staticLayer);
+      L.polyline(line.path, {
+        color: MODE_COLORS[line.mode] || "#888", weight: 5, opacity: 0.7, lineCap: "round",
+        lineJoin: "round", interactive: false,
+      }).addTo(staticLayer);
+    }
+    for (const st of world.stations) {
+      L.circleMarker(st.pos, {
+        radius: 5, color: INK, weight: 3, fillColor: "#fff", fillOpacity: 1,
+      }).bindTooltip(esc(st.name), { direction: "top", offset: [0, -6] }).addTo(staticLayer);
+    }
+    map.setView(world.center, 16, { animate: false });
+    setFollow(true);
+  } finally {
+    loading = false;
+  }
 }
 
 function drawArea(area) {
@@ -61,13 +86,27 @@ function drawArea(area) {
     const outside = [[-89, -179], [-89, 179], [89, 179], [89, -179]];
     L.polygon([outside, area.vertices], {
       stroke: false, fillColor: INK, fillOpacity: 0.3, interactive: false,
-    }).addTo(map);
-    L.polygon(area.vertices, style).addTo(map);
+    }).addTo(staticLayer);
+    L.polygon(area.vertices, style).addTo(staticLayer);
   } else if (area.kind === "circle") {
-    L.circle([area.center_lat, area.center_lon], { ...style, radius: area.radius_m }).addTo(map);
+    L.circle([area.center_lat, area.center_lon], { ...style, radius: area.radius_m })
+      .addTo(staticLayer);
   } else if (area.kind === "bbox") {
-    L.rectangle([[area.min_lat, area.min_lon], [area.max_lat, area.max_lon]], style).addTo(map);
+    L.rectangle([[area.min_lat, area.min_lon], [area.max_lat, area.max_lon]], style)
+      .addTo(staticLayer);
   }
+}
+
+function clearDynamic() {
+  for (const m of markers.vehicles.values()) m.remove();
+  markers.vehicles.clear();
+  for (const m of [...markers.hunters, ...markers.sight]) m.remove();
+  markers.hunters = [];
+  markers.sight = [];
+  for (const key of ["player", "dodger", "ping"]) {
+    if (markers[key]) { markers[key].remove(); markers[key] = null; }
+  }
+  last.money = last.tickets = null;
 }
 
 function connect() {
@@ -96,20 +135,25 @@ function divMarker(pos, html, className, size) {
 }
 
 function render(s) {
+  match = s.match;
+  if (match.district !== district) {
+    if (!loading) loadDistrict(match.district);
+    return; // draw once the district's map is in
+  }
   for (const e of s.events) {
     toast(e.kind, e.text);
     if (e.kind === "inspection") burst(e.text.includes("valid") ? "good" : "bad");
   }
   renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
-  renderHunters(s.hunters);
+  renderHunters(s.hunters, s.role);
+  renderDodger(s.dodger);
   renderPing(s.ping);
-  renderPlayer(s.player);
+  renderPlayer(s.player, s.role);
+  renderScore(match);
   renderHud(s);
   if (follow) map.setView(s.player.pos, map.getZoom(), { animate: false });
-  const over = s.status !== "running";
-  if (over && !gameOver) showResult(s);
-  if (!over) $("overlay").hidden = true;
-  gameOver = over;
+  if (match.round_over && shownRound !== match.round) showResult(s, match);
+  if (!match.round_over) { $("overlay").hidden = true; shownRound = null; }
 }
 
 function renderVehicles(list, myTrip) {
@@ -132,9 +176,12 @@ function renderVehicles(list, myTrip) {
   }
 }
 
-function renderHunters(list) {
+function renderHunters(list, role) {
+  // As the Dodger these are the enemy; as a Bounty Hunter, your bot teammates.
+  const team = role === "hunter" ? " team" : "";
   list.forEach((hunter, i) => {
-    const cls = `toon hunter${hunter.riding ? " riding" : ""}${hunter.chasing ? " chasing" : ""}`;
+    const cls = `toon hunter${team}${hunter.riding ? " riding" : ""}` +
+      `${hunter.chasing ? " chasing" : ""}`;
     if (!markers.hunters[i]) {
       markers.hunters[i] = divMarker(hunter.pos, `<div class="${cls}">🤠</div>`, "", [34, 34]);
       markers.hunters[i].setZIndexOffset(800);
@@ -152,6 +199,20 @@ function renderHunters(list) {
   });
 }
 
+function renderDodger(dodger) {
+  if (!dodger) {
+    if (markers.dodger) { markers.dodger.remove(); markers.dodger = null; }
+    return;
+  }
+  const cls = `toon wanted${dodger.held ? " held" : ""}`;
+  if (!markers.dodger) {
+    markers.dodger = divMarker(dodger.pos, `<div class="${cls}">🏃</div>`, "", [34, 34]);
+    markers.dodger.setZIndexOffset(950);
+  }
+  markers.dodger.setLatLng(dodger.pos);
+  markers.dodger.getElement().firstChild.className = cls;
+}
+
 function renderPing(ping) {
   if (!ping) { if (markers.ping) { markers.ping.remove(); markers.ping = null; } return; }
   if (!markers.ping) {
@@ -165,11 +226,12 @@ function renderPing(ping) {
   markers.ping.setStyle({ opacity: fade, fillOpacity: 0.15 * fade });
 }
 
-function renderPlayer(p) {
+function renderPlayer(p, role) {
   const moving = keys.up || keys.down || keys.left || keys.right;
   const state = p.state === "walk" && !moving ? "idle" : p.state;
-  const face = { held: "😬", wait: "🧍", idle: "🧍" }[state] || "🏃";
-  const cls = `toon player ${state}`;
+  let face = { held: "😬", wait: "🧍", idle: "🧍" }[state] || "🏃";
+  if (role === "hunter") face = "🤠";
+  const cls = `toon player ${role} ${state}`;
   if (!markers.player) {
     markers.player = divMarker(p.pos, `<div class="${cls}">${face}</div>`, "", [34, 34]);
     markers.player.setZIndexOffset(1000);
@@ -178,6 +240,16 @@ function renderPlayer(p) {
   const el = markers.player.getElement().firstChild;
   el.className = cls;
   if (el.textContent !== face) el.textContent = face;
+}
+
+function renderScore(m) {
+  $("score-you").textContent = m.score.you;
+  $("score-bots").textContent = m.score.bots;
+  const round = m.overtime ? `Overtime · round ${m.round}` : `Round ${m.round} of ${m.regulation}`;
+  $("round").textContent = round;
+  $("role").textContent = ROLE_LABEL[m.role];
+  $("role").className = `chip role ${m.role}`;
+  $("district").textContent = `📍 ${world.name}`;
 }
 
 function setChip(id, value) {
@@ -194,23 +266,36 @@ function setChip(id, value) {
 }
 
 function renderHud(s) {
+  const hunter = s.role === "hunter";
   $("clock").textContent = s.clock;
   $("remaining").textContent = `⏳ ${mmss(s.remaining_s / world.time_scale)}`;
-  setChip("money", s.wallet.money);
-  setChip("tickets", s.wallet.tickets);
+  $("wallet").hidden = !s.wallet;
+  if (s.wallet) {
+    setChip("money", s.wallet.money);
+    setChip("tickets", s.wallet.tickets);
+  }
+  $("radar-label").textContent = hunter ? "📡 next report" : "🤠 radar";
   const frac = 1 - s.next_ping_s / world.ping_every_s;
   $("ping-bar").style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
   $("ping-in").textContent = mmss(s.next_ping_s / world.time_scale);
-  const near = s.nearest_hunter_m;
-  $("nearest").textContent =
-    `Nearest Bounty Hunter ${near >= 1000 ? (near / 1000).toFixed(1) + " km" : near + " m"}`;
-  $("nearest").className = near <= world.sight_radius_m * 2 ? "danger" : "";
+  if (hunter) {
+    $("nearest").textContent = s.seen
+      ? "👀 The Dodger is in sight. Get them!"
+      : "The Dodger is hidden. Follow the reports.";
+    $("nearest").className = s.seen ? "danger" : "";
+  } else {
+    const near = s.nearest_hunter_m;
+    $("nearest").textContent =
+      `Nearest Bounty Hunter ${near >= 1000 ? (near / 1000).toFixed(1) + " km" : near + " m"}`;
+    $("nearest").className = near <= world.sight_radius_m * 2 ? "danger" : "";
+  }
 
   let status;
   let held = false;
   if (s.ride) {
     const r = s.ride;
-    const ticket = r.fined ? " · 🚨 fined" : r.ticket ? " · 🎫 valid" : " · 🙈 no ticket";
+    const ticket = hunter ? "" :
+      r.fined ? " · 🚨 fined" : r.ticket ? " · 🎫 valid" : " · 🙈 no ticket";
     status = `Riding ${pill(r.mode, r.route)} → ${esc(r.headsign)}<br>` +
       `<span class="muted">Next: ${esc(r.next_stop)}${ticket}` +
       (r.alight_at ? ` · off at ${esc(r.alight_at)}` : " · E to get off") + "</span>";
@@ -222,7 +307,7 @@ function renderHud(s) {
   } else if (s.waiting) {
     status = `Waiting for ${esc(s.waiting.route)} → ${esc(s.waiting.headsign)} ` +
       `<span class="muted">(${mmss(s.waiting.in_s / world.time_scale)}, E to cancel)</span>` +
-      (s.wallet.tickets ? "" : '<br><span class="danger">No ticket: risky!</span>');
+      (s.wallet && !s.wallet.tickets ? '<br><span class="danger">No ticket: risky!</span>' : "");
   } else {
     status = "On foot" + (s.stop ? "" : ' <span class="muted">· walk to a stop to ride</span>');
   }
@@ -235,9 +320,9 @@ function renderHud(s) {
     pill(d.mode, d.route) +
     `<span class="headsign">${esc(d.headsign)}</span>` +
     `<span class="in">${d.in_s <= 0 ? "now" : mmss(d.in_s / world.time_scale)}</span></div>`);
-  $("stop").innerHTML =
-    `<h3><span>🚏 ${esc(s.stop.name)}</span>` +
-    `<span class="chip" id="buy">T · 🎫 ${world.ticket_price_ft} Ft</span></h3>` +
+  const buy = s.wallet
+    ? `<span class="chip" id="buy">T · 🎫 ${world.ticket_price_ft} Ft</span>` : "";
+  $("stop").innerHTML = `<h3><span>🚏 ${esc(s.stop.name)}</span>${buy}</h3>` +
     (rows.length ? rows.join("") : '<div class="muted">No departures soon.</div>');
 }
 
@@ -258,23 +343,50 @@ function burst(kind) {
   burstTimer = setTimeout(() => { $("burst").hidden = true; }, 1600);
 }
 
-function showResult(s) {
-  const won = s.status === "escaped";
-  $("result-emoji").textContent = won ? "🎉" : "🚨";
-  $("result-title").textContent = won ? "You escaped!" : "Caught!";
-  $("result-text").textContent = won
-    ? `You gave the Bounty Hunters the slip with ${s.wallet.money} Ft left in your pocket.`
-    : (s.message || "A Bounty Hunter caught you.");
-  $("result-stats").textContent =
-    `${s.clock} · ${s.stats.rides} rides · ${s.stats.tickets_bought} tickets · ` +
-    `${s.stats.fines} fines · walked ${s.stats.walked_m} m`;
+function showResult(s, m) {
+  shownRound = m.round;
+  const score = `You ${m.score.you} : ${m.score.bots} Bots`;
+  const roundWon = s.won;
+  let text = s.message ||
+    (s.role === "dodger"
+      ? `You gave the Bounty Hunters the slip with ${s.wallet.money} Ft left in your pocket.`
+      : "The Dodger got away.");
+  if (m.winner) {
+    const won = m.winner === "you";
+    $("result-emoji").textContent = won ? "🏆" : "💀";
+    $("result-title").textContent = won ? "Match won!" : "Match lost!";
+    $("result-text").textContent = `${text} Final score: ${score}.`;
+    $("again").textContent = "New match (R)";
+    $("again").dataset.action = "restart";
+  } else {
+    $("result-emoji").textContent = roundWon ? "🎉" : "🚨";
+    $("result-title").textContent = roundWon ? "Round won!" : "Round lost!";
+    if (m.next_role && m.next_role !== s.role) {
+      const why = m.round === m.regulation / 2 ? "Halftime! "
+        : m.round === m.regulation ? "Overtime: win by two! " : "";
+      text += ` ${why}You switch sides: next round you are the ${ROLE_LABEL[m.next_role]}.`;
+    }
+    $("result-text").textContent = `${text} ${score}.`;
+    $("again").textContent = "Next round (Enter)";
+    $("again").dataset.action = "next";
+  }
+  $("result-stats").textContent = s.role === "dodger"
+    ? `${s.clock} · ${s.stats.rides} rides · ${s.stats.tickets_bought} tickets · ` +
+      `${s.stats.fines} fines · walked ${s.stats.walked_m} m`
+    : `${s.clock} · ${s.stats.rides} rides · walked ${s.stats.walked_m} m`;
+  $("history").innerHTML = m.history
+    .map((r) => `<span class="dot ${r.won ? "won" : "lost"}" title="${ROLE_LABEL[r.role]}">` +
+      `${r.role === "dodger" ? "🏃" : "🤠"}</span>`)
+    .join("");
   $("overlay").hidden = false;
 }
 
+function nextRound() {
+  if (match && match.winner) restart();
+  else send({ type: "next" });
+}
+
 function restart() {
-  for (const m of markers.vehicles.values()) m.remove();
-  markers.vehicles.clear();
-  last.money = last.tickets = null;
   setFollow(true);
   send({ type: "restart" });
 }
@@ -292,7 +404,10 @@ window.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.repeat) return;
-  if (ev.code === "KeyE" || ev.code === "Space") { ev.preventDefault(); send({ type: "use" }); }
+  if (ev.code === "Enter" || ev.code === "NumpadEnter") { ev.preventDefault(); nextRound(); }
+  else if (ev.code === "KeyE" || ev.code === "Space") {
+    ev.preventDefault(); send({ type: "use" });
+  }
   else if (/^Digit[1-6]$/.test(ev.code)) send({ type: "wait", index: Number(ev.code.slice(5)) - 1 });
   else if (ev.code === "KeyT") send({ type: "ticket" });
   else if (ev.code === "KeyF") setFollow(true);
@@ -313,7 +428,10 @@ window.addEventListener("blur", () => {
 $("stop").addEventListener("pointerdown", (ev) => {
   if (ev.target.closest("#buy")) send({ type: "ticket" });
 });
-$("again").addEventListener("click", restart);
+$("again").addEventListener("click", () => {
+  if ($("again").dataset.action === "restart") restart();
+  else nextRound();
+});
 $("follow").addEventListener("click", () => setFollow(true));
 
 init();

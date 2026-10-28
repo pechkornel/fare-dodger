@@ -16,6 +16,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Live game: tickets (buy at a stop with T, or ride without one), hidden ticket inspectors on
   35% of trips, and fines that hold you at the next stop and alert the chasers. The chasers are
   now called Bounty Hunters (`n_hunters`). The client has a cartoon look.
+- Live game: matches against bots. First to 6 rounds wins, sides switch at halftime, and at
+  5-5 sides switch every round until one team leads by two. You can now play a Bounty Hunter
+  hunting a bot Dodger. Each round is on one of six Budapest districts (`[[district]]` in
+  `configs/live.toml`). ADR 0006.
 
 ## [0.1.0] - 2026-10-28
 

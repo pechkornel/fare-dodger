@@ -17,16 +17,26 @@
 
   <div id="hud" class="panel">
     <div class="logo">Bliccelő <span>fare dodger</span></div>
+    <div class="scoreboard">
+      <span class="team you">You <b id="score-you">0</b></span>
+      <span class="vs">:</span>
+      <span class="team bots"><b id="score-bots">0</b> Bots</span>
+    </div>
+    <div class="round-row">
+      <span id="round" class="muted"></span>
+      <span id="role" class="chip role"></span>
+    </div>
+    <div id="district" class="district"></div>
     <div class="clock-row">
       <span id="clock">--:--:--</span>
       <span id="remaining" class="chip"></span>
     </div>
-    <div class="wallet">
+    <div id="wallet" class="wallet">
       <span class="chip money">💰 <b id="money">0</b> Ft</span>
       <span class="chip tickets">🎫 <b id="tickets">0</b></span>
     </div>
     <div class="ping-row">
-      <span>🤠 radar</span>
+      <span id="radar-label">🤠 radar</span>
       <div class="bar"><div id="ping-bar"></div></div>
       <span id="ping-in"></span>
     </div>
@@ -40,7 +50,7 @@
 
   <div id="help" class="panel">
     <b>WASD</b> walk · <b>E</b> wait / get off · <b>1–6</b> pick a departure ·
-    <b>T</b> buy ticket · <b>F</b> follow · <b>R</b> new game
+    <b>T</b> buy ticket · <b>Enter</b> next round · <b>F</b> follow · <b>R</b> new match
   </div>
 
   <button id="follow" class="panel" type="button" hidden>Follow me (F)</button>
@@ -51,7 +61,8 @@
       <h1 id="result-title"></h1>
       <p id="result-text"></p>
       <p id="result-stats" class="muted"></p>
-      <button id="again" type="button">Play again (R)</button>
+      <div id="history" class="history"></div>
+      <button id="again" type="button">Next round (Enter)</button>
     </div>
   </div>
 

@@ -65,6 +65,28 @@ def network_config(path: Path | None) -> NetworkConfig:
     return NetworkConfig.model_validate(section)
 
 
+def live_districts(path: Path | None) -> list[tuple[str, NetworkConfig]]:
+    """The live game's districts: each ``[[district]]`` table (``name`` and polygon
+    ``vertices``) on top of the ``[network]`` section, or that section alone if there are none.
+    """
+    base = network_config(path)
+    tables = load_toml(path).get("district", []) if path is not None else []
+    if not tables:
+        return [("District", base)]
+    return [
+        (
+            str(table["name"]),
+            NetworkConfig.model_validate(
+                {
+                    **base.model_dump(),
+                    "area": {"kind": "polygon", "vertices": table["vertices"]},
+                }
+            ),
+        )
+        for table in tables
+    ]
+
+
 def rules_config(path: Path | None) -> RulesConfig:
     """``[rules]`` section of a TOML file, or the defaults."""
     if path is None:

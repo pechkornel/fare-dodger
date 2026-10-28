@@ -238,7 +238,13 @@ class LiveConfig(_Frozen):
     fine_hold_s: int = Field(default=60, ge=0)
     #: The inspectors report a fined Dodger's position to the Bounty Hunters.
     fine_alerts_hunters: bool = True
-    #: Fixed seed for reproducible games; ``None`` picks a new one per game.
+    #: Match: the first side to win more than half of ``regulation_rounds`` takes the match.
+    #: Sides switch after half of them; at a tie after regulation, sides switch every round
+    #: until one team leads by two.
+    regulation_rounds: int = Field(default=10, ge=2, multiple_of=2)
+    #: The human's side in the first round.
+    start_role: Literal["dodger", "hunter"] = "dodger"
+    #: Fixed seed for reproducible matches; ``None`` picks a new one per match.
     seed: int | None = None
     tile_url: str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
     tile_attribution: str = (
