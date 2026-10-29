@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -7,10 +9,11 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from fare_dodger.config import LiveConfig, NetworkConfig
+from fare_dodger.live.districts import DistrictPool
 from fare_dodger.live.game import LiveGame, Role, Seat, Status
 from fare_dodger.live.match import District, Match, Team, match_winner
 from fare_dodger.live.server import Limits, create_app
-from fare_dodger.live.world import World
+from fare_dodger.live.world import World, distance
 from fare_dodger.network.timetable import Timetable
 
 
@@ -87,6 +90,49 @@ def test_a_player_who_leaves_is_replaced_by_a_bot(world: World) -> None:
     game = two_v_two(world)
     game.make_bot("ann")
     assert game.runners[0].bot is not None and game.runners[0].player is None
+
+
+def test_a_bounty_hunter_who_leaves_becomes_a_bot_not_a_statue(world: World) -> None:
+    game = two_v_two(world)
+    bob = game.humans["bob"].traveller
+    x, y = bob.pos
+    bob.pos = (x + 150.0, y)  # off the network, in a street
+    game.make_bot("bob")
+    assert "bob" not in game.humans
+    assert len(game.hunters.agents) == 3 + 1  # one more bot where Bob stood
+    new = game.hunters.agents[-1]
+    assert new.pos == bob.pos
+    assert len(game.hunter_states()) == 4  # and no frozen human left behind
+    game.step(20)
+    assert distance(new.pos, (x, y)) < 150.0 - 20  # walking back to the network
+
+
+def test_a_player_who_left_is_a_bot_in_the_next_rounds(world: World) -> None:
+    teams = [Team("A", [("ann", "Ann")]), Team("B", [("bob", "Bob")])]
+    match = Match([District("X", world)], LiveConfig(), seed=1, teams=teams, start=Role.DODGER)
+    match.drop_player("bob")
+    match.game.status = Status.ESCAPED
+    assert match.next_round()
+    assert set(match.game.humans) == {"ann"}  # Bob's seat went to a bot
+    assert len(match.game.runners) + len(match.game.hunters.agents) == 1 + 1 + 2
+
+
+def test_waiting_for_the_departure_on_screen(world: World) -> None:
+    game = LiveGame(world, LiveConfig(inspected_share=0.0), seed=3)
+    game.hunters.agents = []
+    you = game.player
+    stop = max(world.boarding_nodes, key=lambda n: len(game.world.departures(n, game.t, 900, 6)))
+    you.pos = world.node_xy[stop]
+    shown = game.departures()
+    first = shown[0]
+    row, second = next((i, d) for i, d in enumerate(shown) if d.time > first.time)
+    game.t = first.time + 1  # the first one leaves before the key press arrives
+    game.wait_for(row, trip=second.trip)  # the row as it was on screen
+    assert you.waiting_for is not None and you.waiting_for.trip == second.trip
+    you.waiting_for = None
+    game.wait_for(0, trip=first.trip)
+    assert you.waiting_for is None
+    assert any("has left" in e.text for e in game.drain_events())
 
 
 def test_match_points_and_target() -> None:
@@ -188,10 +234,38 @@ def test_caps_on_matches_and_per_address(world: World) -> None:
                 assert until(other, "snapshot")["type"] == "snapshot"
 
 
+def test_no_joining_while_the_match_loads(world: World) -> None:
+    # The bug: a player joining while the first district loaded was left out of the teams
+    # and stuck in the lobby for the whole match.
+    gate = threading.Event()
+
+    def slow(_: int) -> World:
+        gate.wait(10)
+        return world
+
+    pool = DistrictPool(["Slow"], slow)
+    client = TestClient(create_app(pool, LiveConfig(seed=5), Limits(max_per_ip=5)))
+    with client, client.websocket_connect("/ws") as host:
+        host.send_json({"type": "create", "size": 2, "name": "Ann"})
+        code = until(host, "lobby")["code"]
+        host.send_json({"type": "start"})
+        while not until(host, "lobby")["starting"]:
+            pass
+        with client.websocket_connect("/ws") as late:
+            late.send_json({"type": "join", "code": code, "name": "Bob"})
+            assert "already started" in late.receive_json()["message"]
+        gate.set()
+        assert until(host, "snapshot")["role"] in ("dodger", "hunter")
+
+
 def test_idle_rooms_close_and_health(world: World) -> None:
     with app(world, idle_s=0.3) as client:
         with client.websocket_connect("/ws") as ws:
             ws.send_json({"type": "solo"})
+            # Standing still is playing: a match gets five times as long (1.5 s here).
+            started = time.monotonic()
+            while time.monotonic() - started < 0.6:
+                assert ws.receive_json()["type"] == "snapshot"
             closed = until(ws, "closed")
             assert "without anyone playing" in closed["message"]
             with pytest.raises(WebSocketDisconnect):

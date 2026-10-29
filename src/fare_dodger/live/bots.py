@@ -120,6 +120,16 @@ class BountyHunters:
             for node, target in zip(starts, self._assign(starts, targets), strict=True)
         ]
 
+    def add(self, pos: Point) -> None:
+        """A new bot at ``pos`` (a human who left): it walks to the nearest station, and the
+        team is shared out again over the latest reports."""
+        node = self.world.nearest_node(pos)
+        if node is None:
+            return
+        self.agents.append(Agent(node, pos, node, returning_to=node))
+        if self.last_pings:
+            self.on_pings(self.last_pings)
+
     # --- knowledge -------------------------------------------------------------------------
 
     def on_ping(self, ping: Ping) -> None:

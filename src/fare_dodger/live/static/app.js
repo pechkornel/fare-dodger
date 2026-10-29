@@ -50,6 +50,7 @@ const markers = { vehicles: new Map(), hunters: [], player: null, dodger: null }
 let leaving = false;     // closing the connection on purpose (back to the menu)
 let pending = null;      // newest snapshot not drawn yet
 let pendingEvents = [];  // messages from every snapshot since the last frame
+let shownDepartures = []; // the departures on screen, for the 1-6 keys
 
 function init() {
   setupMinimap();
@@ -630,6 +631,7 @@ function renderHud(s) {
       `<div class="muted">Runs you almost bus-fast for ` +
       `${mmss(world.coffee_boost_s / world.time_scale)}.</div>`
     : "");
+  shownDepartures = s.stop ? s.stop.departures : [];
   if (!s.stop) { $("stop").innerHTML = cafe; return; }
   const rows = s.stop.departures.map((d, i) =>
     `<div class="dep${d.waiting ? " waiting" : ""}"><span class="key">${i + 1}</span>` +
@@ -744,7 +746,11 @@ window.addEventListener("keydown", (ev) => {
   else if (ev.code === "KeyE" || ev.code === "Space") {
     ev.preventDefault(); send({ type: "use" });
   }
-  else if (/^Digit[1-6]$/.test(ev.code)) send({ type: "wait", index: Number(ev.code.slice(5)) - 1 });
+  else if (/^Digit[1-6]$/.test(ev.code)) {
+    // Send the trip on screen: by the time this arrives, the list may have moved on.
+    const index = Number(ev.code.slice(5)) - 1;
+    send({ type: "wait", index, trip: shownDepartures[index]?.trip });
+  }
   else if (ev.code === "KeyT") send({ type: "ticket" });
   else if (ev.code === "KeyC") send({ type: "coffee" });
   else if (ev.code === "KeyF") setFollow(true);

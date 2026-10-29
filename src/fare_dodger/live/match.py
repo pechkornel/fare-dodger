@@ -137,6 +137,11 @@ class Match:
         msg = f"{pid!r} is in neither team"
         raise KeyError(msg)
 
+    def drop_player(self, pid: str) -> None:
+        """A player left: from the next round on, a bot plays their seat."""
+        for team in self.teams:
+            team.players = [(p, name) for p, name in team.players if p != pid]
+
     def _district_for(self, number: int) -> int:
         while len(self.order) < number:
             cycle = self.districts.playable()

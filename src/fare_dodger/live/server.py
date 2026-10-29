@@ -13,7 +13,7 @@ first. During a match each player sends key state and actions::
 
     {"type": "keys", "up": bool, "down": bool, "left": bool, "right": bool}
     {"type": "use"}                 # board / get off / stay on / stop waiting
-    {"type": "wait", "index": int}  # wait for a listed departure
+    {"type": "wait", "index": int, "trip": int}  # wait for a listed departure (by trip)
     {"type": "ticket"}              # buy a ticket at the current stop
     {"type": "coffee"}              # buy a coffee at the current café
     {"type": "next"}                # host: start the next round now
@@ -26,7 +26,8 @@ while playing. Errors arrive as ``{"type": "error", "message": str}``.
 Safety caps (environment variables, for a public server): at most ``FARE_DODGER_MAX_MATCHES``
 rooms at once (20), at most ``FARE_DODGER_MAX_MATCHES_PER_IP`` rooms per client address (2;
 behind Cloudflare the ``CF-Connecting-IP`` header), and a room closes when its last player
-leaves or after ``FARE_DODGER_IDLE_S`` seconds (120) without input from anyone.
+leaves or after ``FARE_DODGER_IDLE_S`` seconds (120) without input from anyone; five times
+that while a match is being played, since standing still is part of the game.
 """
 
 from __future__ import annotations
@@ -61,6 +62,8 @@ ROUND_BREAK_S = 8.0
 HELLO_TIMEOUT_S = 30.0
 #: A snapshot that cannot be sent this fast is skipped for that player.
 SEND_TIMEOUT_S = 0.5
+#: During a match, a room closes after this many times ``idle_s`` without input.
+IN_MATCH_IDLE_FACTOR = 5
 SIZES = (1, 2, 3)
 CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # no I or O
 NAME_MAX = 16
@@ -142,6 +145,11 @@ class Room:
             "teams": teams,
             "starting": self.starting,
         }
+
+
+def minutes(seconds: float) -> str:
+    """``"2 minutes"`` (or seconds, for short test limits)."""
+    return f"{round(seconds / 60)} minutes" if seconds >= 90 else f"{round(seconds)} seconds"
 
 
 def clean_name(value: object, fallback: str) -> str:
@@ -286,7 +294,8 @@ def create_app(
         if room is None:
             msg = f"No game with code {code.strip().upper() or '?'}."
             raise RefusedError(msg)
-        if room.match is not None:
+        # Starting: the teams are set while the first district loads.
+        if room.match is not None or room.starting:
             msg = "That game has already started."
             raise RefusedError(msg)
         counts = [len(room.team_members(t)) for t in (0, 1)]
@@ -349,8 +358,10 @@ def create_app(
 
     def leave(room: Room, pid: str) -> None:
         room.members.pop(pid, None)
-        if room.match is not None and pid in room.match.game.humans:
-            room.match.game.make_bot(pid)
+        if room.match is not None:
+            room.match.drop_player(pid)  # bots take their seat in the next rounds
+            if pid in room.match.game.humans:
+                room.match.game.make_bot(pid)  # and in this one
         if room.host == pid and room.members:
             room.host = next(iter(room.members))
         room.lobby_dirty = True
@@ -371,8 +382,12 @@ def create_app(
         try:
             while room.code in rooms:
                 now = time.monotonic()
-                if room.close_reason is None and now - room.last_input > caps.idle_s:
-                    room.close_reason = "Closed after two minutes without anyone playing."
+                # Hiding still or riding a long way is playing too, so a match in progress
+                # gets longer: only an abandoned match goes that long without a key pressed.
+                playing = room.match is not None and room.match.winner is None
+                idle_s = caps.idle_s * (IN_MATCH_IDLE_FACTOR if playing else 1)
+                if room.close_reason is None and now - room.last_input > idle_s:
+                    room.close_reason = f"Closed after {minutes(idle_s)} without anyone playing."
                 if room.close_reason is not None:
                     for m in list(room.members.values()):
                         await send(m, {"type": "closed", "message": room.close_reason})
@@ -448,7 +463,7 @@ def create_app(
         match = room.match
         host = room.host == pid
         if match is None:
-            if kind == "team":
+            if kind == "team" and not room.starting:
                 member = room.members[pid]
                 other = 1 - member.team
                 if len(room.team_members(other)) < room.size:
@@ -538,6 +553,6 @@ def apply_message(game: LiveGame, msg: dict[str, Any], pid: str | None = None) -
     elif kind == "coffee":
         game.buy_coffee(pid)
     elif kind == "wait":
-        index = msg.get("index")
+        index, trip = msg.get("index"), msg.get("trip")
         if isinstance(index, int):
-            game.wait_for(index, pid)
+            game.wait_for(index, pid, trip if isinstance(trip, int) else None)

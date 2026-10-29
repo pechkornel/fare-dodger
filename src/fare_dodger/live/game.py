@@ -571,8 +571,10 @@ class LiveGame:
         else:
             self.wait_for(0, pid)
 
-    def wait_for(self, index: int, pid: str | None = None) -> None:
-        """Wait at the current stop for departure ``index`` of the listed departures."""
+    def wait_for(self, index: int, pid: str | None = None, trip: int | None = None) -> None:
+        """Wait at the current stop for departure ``index`` of the listed departures, or for
+        ``trip`` if given: the list moves on as vehicles leave, so the trip the player saw
+        is the one they meant."""
         human = self._active(pid)
         if human is None:
             return
@@ -583,10 +585,14 @@ class LiveGame:
             self._emit("info", "Your coffee is nearly ready…", to)
             return
         departures = self.departures(pid)
+        if trip is not None:
+            index = next((i for i, d in enumerate(departures) if d.trip == trip), len(departures))
         if self.current_stop(pid) is None:
             self._emit("info", "Walk to a stop first.", to)
         elif index >= len(departures):
-            self._emit("info", "No such departure.", to)
+            self._emit(
+                "info", "That one has left." if trip is not None else "No such departure.", to
+            )
         else:
             dep = departures[index]
             p.waiting_for = dep
@@ -604,17 +610,24 @@ class LiveGame:
         self._emit("info", f"Getting off at {name}.", to)
 
     def make_bot(self, pid: str) -> None:
-        """A human left: a bot plays their Dodger; a Bounty Hunter just stops."""
+        """A human left: a bot plays their Dodger, or joins the bot Bounty Hunters where they
+        stood (stepping off if they were riding)."""
         human = self.humans.get(pid)
         if human is None:
             return
         human.keys = Keys()
+        human.traveller.waiting_for = None
         runner = human.runner
         if runner is not None and runner.bot is None:
             runner.player = None
             runner.bot = BotDodger(
                 self.world, self.cfg, random.Random(f"{self.seed}:bot{runner.index}"), runner.index
             )
+        if human.role is Role.HUNTER:
+            del self.humans[pid]
+            if self.default_player == pid:
+                self.default_player = next(iter(self.humans), None)
+            self.hunters.add(human.traveller.pos)
 
     # --- simulation ------------------------------------------------------------------------
 
@@ -1000,6 +1013,7 @@ class LiveGame:
                 "name": names[stop],
                 "departures": [
                     {
+                        "trip": dep.trip,
                         "route": dep.route,
                         "mode": dep.mode.value,
                         "headsign": dep.headsign,
