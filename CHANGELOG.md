@@ -6,6 +6,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Live game: a room no longer closes in the middle of a match after 2 minutes without a key
+  pressed. A Dodger hiding still or riding a long way is playing. During a match the limit
+  is five times `FARE_DODGER_IDLE_S`, so 10 minutes by default.
+- Live game: 1–6 waits for the departure that was on screen. Before, a vehicle leaving
+  just as you pressed shifted the list, and you waited for the line below it.
+- Live game: nobody can join or switch teams while a match is loading its first district.
+  Before, a player who joined then was left out of the match and stuck in the lobby.
+- Live game: a player who leaves is played by a bot for the rest of the match. A Bounty
+  Hunter used to stay behind as a statue that still caught Dodgers and gave the team
+  sight. In later rounds, a departed player still had a human seat that nobody played.
+
 ### Added
 - Live game: the whole city. There are 21 districts: the six inner ones and 15 more around
   Budapest, from Óbuda and Újpest to Csepel and Kispest, plus five on the Danube bridges.
