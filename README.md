@@ -68,8 +68,12 @@ teams, CS-style.
   departure) to wait for a real tram, trolleybus, bus or metro. Press **E** again to get off at
   the next stop. Press **E** again (or click the switch, bottom right: blue on board, red getting
   off) to stay on. **Enter** starts the next round.
-- **As the Dodger:** survive. Buy a ticket at a stop with **T** (450 Ft of your 2,000 Ft), or
-  *bliccel* and ride without one.
+- **As the Dodger:** survive. You start with 1,000 Ft. Buy a ticket at a stop with **T**
+  (450 Ft), or *bliccel* and ride without one.
+  - Earn money with packages: 📦 boxes wait around the district (only the Dodgers see them).
+    Walk to one and press **E** to take it; a 🏁 flag (with an arrow when it is off screen)
+    shows where to deliver it, 600–1,600 m away, for 1,200 Ft. Get caught and the package is
+    lost.
   - Real cafés (☕ on the map) sell coffee with **C**: 500 Ft and 3 seconds standing still,
     then 20 seconds running almost as fast as a bus.
   - Ticket inspectors ride about 35% of the trips, and you only find out once you are aboard.
@@ -89,7 +93,8 @@ See [ADR 0005](docs/decisions/0005-live-prototype.md),
 [ADR 0008](docs/decisions/0008-toy-town-graphics.md),
 [ADR 0009](docs/decisions/0009-coffee.md),
 [ADR 0010](docs/decisions/0010-menu-minimap-parks.md),
-[ADR 0012](docs/decisions/0012-free-walking-and-rotation.md) and
+[ADR 0012](docs/decisions/0012-free-walking-and-rotation.md),
+[ADR 0013](docs/decisions/0013-packages.md) and
 [ADR 0011](docs/decisions/0011-online-and-deployment.md).
 
 Every command takes `-c configs/default.toml`, which documents every network and rule
@@ -149,7 +154,19 @@ docker compose logs -f game
 - **No CDNs:** MapLibre GL JS, three.js and the Fredoka font are served by the game itself
   (`src/fare_dodger/live/static/vendor/`, with their licences). The map tiles and label glyphs
   come from OpenFreeMap.
-- **Updating:** `git pull && docker compose up -d --build`. The cached data in `./data` is
+- **Admin page:** set `FARE_DODGER_ADMIN_TOKEN` in `.env` to a long random password
+  (`openssl rand -hex 24`), then open `/admin` and type it.
+  - **What it shows:** the running version and commit, uptime, memory, players, every game
+    (code, size, players, round and score) with a **Close** button, and the timetable in use.
+  - **Update now:** asks the server to update itself. Install the updater once with
+    `./deploy/install-updater.sh`. It adds a systemd path unit that, when the button is
+    pressed, runs `deploy/update.sh` as you: `git pull`, then
+    `docker compose up -d --build`, with your git login and Docker group. The admin page
+    shows the progress and the log. Running games are cut off, and the restart also refreshes
+    the timetable.
+  - **Locking it down:** behind Cloudflare Access, add a second Access application for the
+    path `/admin` (and `/api/admin`) that allows only your email.
+- **Updating by hand:** `./deploy/update.sh`, or `git pull && docker compose up -d --build`. The cached data in `./data` is
   reused. Networks are rebuilt automatically when the feed or the config changes.
 
 ## Architecture

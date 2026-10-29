@@ -6,6 +6,26 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Admin page (`/admin`, on when `FARE_DODGER_ADMIN_TOKEN` is set): version and commit, uptime,
+  memory, players, every game with a Close button, the timetable in use, and an **Update now**
+  button. The button asks the host's updater (`deploy/install-updater.sh`, a systemd path
+  unit) to run `deploy/update.sh`: `git pull` and `docker compose up -d --build`, with progress
+  and log shown on the page. ADR 0014.
+
+### Added
+- Live game: packages. Dodgers start with 1,000 Ft (was 2,000) and earn 1,200 Ft per
+  delivery: take a 📦 with E, carry it to the 🏁 600–1,600 m away (marked on the map, the
+  minimap and an edge arrow). Only the Dodgers see packages; a caught Dodger loses theirs.
+  ADR 0013.
+
+### Fixed
+- Live game: every player reads their own round result. A catcher in a 1v1 used to see "The
+  Dodger got away" under "Round won!".
+- Live game: the Bounty Hunters' edge arrow pointed at random places when zoomed in (targets
+  beyond the tilted view's horizon); arrows now follow the map's rotation, and off-view markers
+  are hidden.
+
 ### Changed
 - Live game: walk anywhere except through buildings (OpenStreetMap footprints, downloaded once);
   streets, rail lines, parks and squares are all open, and you slide along walls. This

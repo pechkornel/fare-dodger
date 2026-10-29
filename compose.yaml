@@ -17,6 +17,9 @@ services:
       FARE_DODGER_MAX_MATCHES: ${FARE_DODGER_MAX_MATCHES:-20}
       FARE_DODGER_MAX_MATCHES_PER_IP: ${FARE_DODGER_MAX_MATCHES_PER_IP:-2}
       FARE_DODGER_IDLE_S: ${FARE_DODGER_IDLE_S:-120}
+      # The admin page (/admin) is on when this is set; the updater passes the running commit.
+      FARE_DODGER_ADMIN_TOKEN: ${FARE_DODGER_ADMIN_TOKEN:-}
+      FARE_DODGER_COMMIT: ${FARE_DODGER_COMMIT:-}
     restart: unless-stopped
     mem_limit: ${GAME_MEMORY:-1536m}
     healthcheck:

@@ -55,6 +55,15 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 .chip.money { background: var(--sun); }
 .chip.boost { background: #e9c9a6; animation: wobble 0.6s ease-in-out infinite; }
 .chip.boost[hidden] { display: none; }
+.edge-arrow.goal .arrow { background: var(--player); }
+.parcel-row { margin: 8px 0 2px; padding: 6px 10px; border-radius: 12px; background: #fff3bf;
+  border: 2px solid var(--ink); font-weight: 600; font-size: 14px; }
+.parcel-sign, .goal-sign { display: grid; place-items: center; width: 32px; height: 32px;
+  border-radius: 10px; background: #ffe8a3; border: 3px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink); font-size: 17px; animation: bob 0.8s ease-in-out infinite alternate; }
+.goal-sign { border-radius: 50%; background: #b2f2bb; position: relative; }
+.goal-sign::after { content: ""; position: absolute; inset: -14px; border-radius: 50%;
+  border: 3px solid var(--player); animation: pulse 1.4s ease-out infinite; }
 .cafe-sign { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
   background: #f1d3b3; border: 3px solid var(--ink); box-shadow: 2px 2px 0 var(--ink);
   font-size: 16px; cursor: default; }
@@ -208,15 +217,15 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 #minimap[hidden] { display: none; }
 
 /* --- arrow towards the latest report (Bounty Hunters) ------------------------------- */
-#ping-arrow { position: absolute; z-index: 1100; display: flex; flex-direction: column;
+.edge-arrow { position: absolute; z-index: 1100; display: flex; flex-direction: column;
   align-items: center; gap: 2px; transform: translate(-50%, -50%); pointer-events: none; }
-#ping-arrow[hidden] { display: none; }
-#ping-arrow .arrow { display: grid; place-items: center; width: 46px; height: 46px;
+.edge-arrow[hidden] { display: none; }
+.edge-arrow .arrow { display: grid; place-items: center; width: 46px; height: 46px;
   border-radius: 50%; background: var(--hunter); color: #fff; font-size: 24px;
   border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
   animation: bump 1.2s ease-in-out infinite; }
-#ping-arrow .arrow i { font-style: normal; display: block; line-height: 1; }
-#ping-arrow #ping-dist { padding: 1px 8px; border: 2px solid var(--ink); border-radius: 999px;
+.edge-arrow .arrow i { font-style: normal; display: block; line-height: 1; }
+.edge-arrow .goal-dist, #ping-dist, #goal-dist { padding: 1px 8px; border: 2px solid var(--ink); border-radius: 999px;
   background: #fff; font-size: 13px; font-weight: 700; }
 
 /* --- get on / get off switch ---------------------------------------------------------- */
@@ -243,7 +252,7 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 #ride-toggle.locked { cursor: not-allowed; opacity: 0.85; }
 
 body.in-menu #hud, body.in-menu #help, body.in-menu #topbar, body.in-menu #minimap,
-body.in-menu #ride-toggle, body.in-menu #ping-arrow, body.in-menu #feed,
+body.in-menu #ride-toggle, body.in-menu .edge-arrow, body.in-menu #feed,
 body.in-menu #follow { display: none !important; }
 
 /* --- main menu ---------------------------------------------------------------------- */
