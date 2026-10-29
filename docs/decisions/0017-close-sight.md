@@ -26,3 +26,11 @@ only when they are quite zoomed in.
   advantage, left for the balance pass.
 - The zoom limit is enforced only in the client. The server sends just the close ones, so
   zooming in on a far street shows nothing new.
+
+## Addendum: balance on the bigger districts
+200 bot rounds on Inner Pest, after the 1.5x wider districts, at the live config's random
+start times. The bot Dodger escaped 72% (target about 45%). Pings every 180 s instead of
+270 s plus a third extra Bounty Hunter only brought that to 68%. The bots still chased
+within `sight_radius_m` 100 m while their team saw 200 m. With `sight_radius_m` at 200 m
+too, it is 48% (45% by day, 56% at night). A Dodger standing still escapes 0-2%.
+Now: `ping_every_s` 180 (20 real seconds), `hunter_extra` 3, `sight_radius_m` 200.

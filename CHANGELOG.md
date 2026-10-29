@@ -6,6 +6,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed (balance)
+- Live game: the bigger districts made the Dodger too strong (the bot Dodger escaped 72%).
+  Reports now come every 180 timetable seconds (20 real seconds), the hunting side gets
+  three extra bots, and bot Bounty Hunters chase within 200 m, as far as their team sees.
+  The bot Dodger now escapes 48%.
+
 ### Added
 - Live game: rounds start at a random time of day: the small hours (🌙 night buses only), the
   morning and evening rushes, midday, evening (ADR 0018). Night bus routes are no longer

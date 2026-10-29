@@ -50,7 +50,7 @@ teams, CS-style.
 - **Playing together:** the menu offers **Play solo** (you against bots), **Create a game**
   (1v1, 2v2 or 3v3) and **Join a game** by its 4-letter code. In the lobby, players join the
   smaller team and can switch. The host starts the match whenever they like: empty places are
-  played by bots, the hunting side always gets two extra bots, and a random team runs first.
+  played by bots, the hunting side always gets three extra bots, and a random team runs first.
 - **Scoring:** every Dodger is a point. Escaping scores for the runners, being caught scores
   for the hunters, so a 2v2 round can end 1–1. The hunters win the round outright by catching
   everyone. A match is quick (best of 3) or long (best of 6), picked in the menu: the first
@@ -87,7 +87,7 @@ teams, CS-style.
     Bounty Hunters are told, so it's a race: run when the door opens.
   - You see the Bounty Hunters only within 200 m and zoomed in. Otherwise the top bar shows
     how far the nearest one is: red when close, green when far.
-  - Three Bounty Hunters learn your position every 270 timetable seconds, chase you on sight,
+  - Four Bounty Hunters learn your position every 180 timetable seconds (20 real seconds), chase you within 200 m,
     and catch you when you are both on foot (waiting at a stop counts), or when they ride
     the same vehicle. Staying aboard is safe.
 - **As a Bounty Hunter:** hunt the Dodgers with your team. You see them only up close (200 m, zoomed in) or
