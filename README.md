@@ -91,6 +91,9 @@ teams, CS-style.
     the same vehicle. Staying aboard is safe.
 - **As a Bounty Hunter:** hunt the Dodgers with your team. You see them only up close (200 m, zoomed in) or
   through the reports on the minimap, and an arrow at the screen edge points to the latest one.
+- **Pings:** press the scroll wheel (middle click) on the map to mark a spot for your team,
+  for 8 seconds. Bots ping too: Bounty Hunter bots when they spot a Dodger, Dodger bots
+  when a Bounty Hunter comes close.
 - **Map:** zoom with the mouse wheel or **+/−**. Zoomed out, the map is flat. Zoomed in, it
   tilts into a 3D toy town of rounded-cube houses, trams, buses and people.
 

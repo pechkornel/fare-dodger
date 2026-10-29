@@ -18,6 +18,7 @@ first. During a match each player sends key state and actions::
     {"type": "wait", "index": int, "trip": int}  # wait for a listed departure (by trip)
     {"type": "ticket"}              # buy a ticket at the current stop
     {"type": "coffee"}              # buy a coffee at the current café
+    {"type": "mark", "pos": [lat, lon]}  # ping a spot for your team (middle mouse button)
     {"type": "next"}                # host: start the next round now
     {"type": "restart"}             # host: back to the lobby once the match is over
 
@@ -36,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 import os
 import random
 import secrets
@@ -556,6 +558,14 @@ def apply_message(game: LiveGame, msg: dict[str, Any], pid: str | None = None) -
         )
     elif kind == "use":
         game.use(pid)
+    elif kind == "mark":
+        pos = msg.get("pos")
+        if (
+            isinstance(pos, list)
+            and len(pos) == 2
+            and all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos)
+        ):
+            game.mark((float(pos[0]), float(pos[1])), pid)
     elif kind == "ticket":
         game.buy_ticket(pid)
     elif kind == "coffee":

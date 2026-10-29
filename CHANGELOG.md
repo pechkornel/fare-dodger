@@ -6,6 +6,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Live game: pings. Press the scroll wheel (middle click) on the map to mark a spot for
+  your team, a pulsing 📍 with your name for 8 seconds, also on the minimap. Bots ping too:
+  a Bounty Hunter bot marks a Dodger it spots, and a Dodger bot marks a Bounty Hunter
+  coming close.
+
 ### Changed
 - Live game: the two sides see each other only up close (200 m) and zoomed in. The Dodger's
   top bar shows how far the nearest Bounty Hunter is, red when close and green when far

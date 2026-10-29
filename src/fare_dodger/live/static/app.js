@@ -137,6 +137,12 @@ function createMap(w) {
     scrollZoom: false, doubleClickZoom: false, boxZoom: false,
   });
   map.on("dragstart", () => { dragging = true; setFollow(false); });
+  // The middle mouse button (pressing the scroll wheel) pings that spot for your team.
+  map.on("mousedown", (ev) => {
+    if (ev.originalEvent.button !== 1) return;
+    ev.originalEvent.preventDefault();   // no auto-scroll
+    send({ type: "mark", pos: [ev.lngLat.lat, ev.lngLat.lng] });
+  });
   // WASD are relative to the screen: tell the server whenever the map turns under held keys.
   map.on("rotate", () => {
     if (keys.up || keys.down || keys.left || keys.right) sendKeys();
@@ -380,6 +386,8 @@ function clearDynamic() {
   markers.vehicles.clear();
   for (const m of markers.hunters) m.remove();
   markers.hunters = [];
+  for (const m of markers.marks || []) m.remove();
+  markers.marks = [];
   for (const key of ["player", "dodger"]) {
     if (markers[key]) { markers[key].remove(); markers[key] = null; }
   }
@@ -454,6 +462,7 @@ function render(s) {
   renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
   renderHunters(s.hunters, s.role);
   renderDodgers(s.dodgers, s.role);
+  renderMarks(s.marks || []);
   renderGround(s);
   renderPlayer(s.player, s.role);
   town.update(s);
@@ -526,6 +535,24 @@ function renderDodgers(list, role) {
     }
     markers.dodgers[i].setLngLat(lngLat(d.pos));
     markers.dodgers[i].getElement().firstChild.className = cls;
+  });
+}
+
+// Your team's pings (the middle mouse button): a pulsing pin with who put it there.
+function renderMarks(list) {
+  markers.marks = markers.marks || [];
+  while (markers.marks.length > list.length) markers.marks.pop().remove();
+  list.forEach((m, i) => {
+    const html = `<div class="mark">📍<small>${esc(m.name)}</small></div>`;
+    if (!markers.marks[i]) markers.marks[i] = divMarker(m.pos, html, 1200);
+    const marker = markers.marks[i];
+    marker.setLngLat(lngLat(m.pos));
+    const el = marker.getElement();
+    if (el.dataset.key !== `${m.name}|${m.pos}`) {
+      el.dataset.key = `${m.name}|${m.pos}`;
+      el.innerHTML = html;
+    }
+    el.style.opacity = Math.min(1, Math.max(0, (8 - m.age_s) / 2));  // fades out at the end
   });
 }
 
@@ -1032,9 +1059,11 @@ function drawMinimap(s) {
       c.fillText("?", x, y);
     }
     for (const h of s.hunters) miniDot(c, h.pos, "#ffa8a8", 4);
+    for (const m of s.marks || []) miniDot(c, m.pos, "#fff", 4, "#7950f2");
     miniDot(c, s.player.pos, "#fa5252", 5.5, "#fff");
   } else {
     for (const pos of s.packages || []) miniDot(c, pos, "#ffd43b", 3.5);
+    for (const m of s.marks || []) miniDot(c, m.pos, "#fff", 4, "#7950f2");
     if (s.delivery) miniDot(c, s.delivery.pos, "#2f9e44", 5, "#fff");
     // The Dodgers' map shows their own team, never the Bounty Hunters.
     for (const d of s.dodgers) miniDot(c, d.pos, d.caught ? "#adb5bd" : "#8ce99a", 4);
