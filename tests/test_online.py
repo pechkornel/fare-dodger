@@ -305,3 +305,34 @@ def test_best_of_three() -> None:
     assert match_winner(2, 0, 2, 3) is True
     assert match_winner(1, 1, 2, 3) is None
     assert match_winner(3, 3, 3, 3, size=2) is None
+
+
+def test_pings_reach_your_team_only_and_fade(world: World) -> None:
+    game = two_v_two(world)
+    game.hunters.agents = []
+    spot = game.world.proj.to_latlon(game.runners[0].traveller.pos)
+    game.mark(spot, "ann")
+    marks = game.snapshot("ann")["marks"]
+    assert [m["name"] for m in marks] == ["Ann"] and marks[0]["age_s"] == 0
+    assert game.snapshot("bob")["marks"] == []  # the other side never sees it
+    game.mark(spot, "ann")  # too soon: still one
+    assert len(game.snapshot("ann")["marks"]) == 1
+    game.step(9 * game.cfg.time_scale)
+    assert game.snapshot("ann")["marks"] == []
+
+
+def test_bots_ping_their_team(world: World) -> None:
+    game = two_v_two(world)
+    bot = game.runners[1]
+    assert bot.bot is not None
+    # A Dodger bot warns its team of a Bounty Hunter coming close.
+    x, y = bot.traveller.pos
+    game.humans["bob"].traveller.pos = (x + game.cfg.see_radius_m - 20, y)
+    game._bot_marks([a.chasing for a in game.hunters.agents])
+    assert [m["name"] for m in game.snapshot("ann")["marks"]] == ["Dodger bot"]
+    # A Bounty Hunter bot that spots a Dodger marks them for its team.
+    agent = game.hunters.agents[0]
+    agent.chasing = True
+    game._bot_marks([False] * len(game.hunters.agents))
+    marks = game.snapshot("bob")["marks"]
+    assert [m["name"] for m in marks] == ["Hunter bot 1"]

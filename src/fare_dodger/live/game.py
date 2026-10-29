@@ -184,6 +184,23 @@ class Runner:
     deliveries: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class Mark:
+    """A ping a player or bot put on the map for their own team."""
+
+    role: Role
+    pos: Point
+    name: str
+    time: float
+
+
+#: A mark stays on the map this many real seconds.
+MARK_REAL_S = 8.0
+#: One mark per player this often (real seconds); bots warn their team this often at most.
+MARK_EVERY_REAL_S = 1.0
+BOT_MARK_EVERY_REAL_S = 15.0
+
+
 @dataclass
 class Human:
     """A human player in the round, on either side."""
@@ -223,6 +240,10 @@ class LiveGame:
         self.t = float(cfg.start_seconds)
         self.status = Status.RUNNING
         self.pings: list[Ping] = []
+        #: Pings players and bots put on the map for their own team.
+        self.marks: list[Mark] = []
+        #: When each Dodger bot last warned its team (runner index -> time).
+        self._bot_warned: dict[int, float] = {}
         self.caught_by: str | None = None
         self.next_ping = cfg.start_seconds + cfg.ping_every_s
         rng = random.Random(seed)
@@ -460,6 +481,41 @@ class LiveGame:
     def set_keys(self, keys: Keys, pid: str | None = None) -> None:
         self.humans[self._pid(pid)].keys = keys
 
+    def mark(self, latlon: tuple[float, float], pid: str | None = None) -> None:
+        """Ping a spot on the map for your team (the middle mouse button)."""
+        human = self._active(pid)
+        if human is None:
+            return
+        every = MARK_EVERY_REAL_S * self.cfg.time_scale
+        if any(m.name == human.name and self.t - m.time < every for m in self.marks):
+            return
+        pos = self.world.proj.to_xy(*latlon)
+        self._add_mark(Mark(human.role, pos, human.name, self.t))
+
+    def _add_mark(self, mark: Mark) -> None:
+        ttl = MARK_REAL_S * self.cfg.time_scale
+        self.marks = [m for m in self.marks if self.t - m.time < ttl] + [mark]
+
+    def _bot_marks(self, chasing: list[bool]) -> None:
+        """Bots ping for their team too: a Bounty Hunter bot that spots a Dodger marks them,
+        a Dodger bot marks a Bounty Hunter coming close."""
+        dodgers = [r.traveller.pos for r in self.in_play() if r.traveller.ride is None]
+        for k, agent in enumerate(self.hunters.agents):
+            if agent.chasing and not (chasing[k] if k < len(chasing) else False) and dodgers:
+                spotted = min(dodgers, key=lambda p: distance(agent.pos, p))
+                self._add_mark(Mark(Role.HUNTER, spotted, f"Hunter bot {k + 1}", self.t))
+        every = BOT_MARK_EVERY_REAL_S * self.cfg.time_scale
+        hunters = [s.pos for s, _ in self.hunter_states()]
+        for runner in self.in_play():
+            if runner.bot is None or self.t - self._bot_warned.get(runner.index, -1e9) < every:
+                continue
+            d = runner.traveller.pos
+            close = [h for h in hunters if distance(h, d) <= self.cfg.see_radius_m]
+            if close:
+                self._bot_warned[runner.index] = self.t
+                near = min(close, key=lambda h: distance(h, d))
+                self._add_mark(Mark(Role.DODGER, near, runner.name, self.t))
+
     def _active(self, pid: str | None) -> Human | None:
         """The human, if the round is on and they are still in it (not caught)."""
         human = self.humans[self._pid(pid)]
@@ -651,6 +707,7 @@ class LiveGame:
 
     def _advance(self, h: float) -> None:
         self.t = min(self.t + h, self.cfg.end_seconds)
+        chasing = [agent.chasing for agent in self.hunters.agents]
         for runner in self.in_play():
             if runner.bot is not None:
                 target, direction = runner.bot.control(self)
@@ -668,6 +725,7 @@ class LiveGame:
             h,
             [(r.traveller.pos, r.traveller.ride is None) for r in self.in_play()],
         )
+        self._bot_marks(chasing)
         if self.t >= self.next_ping:
             self._ping()
         self._deliver()
@@ -1190,6 +1248,16 @@ class LiveGame:
                 else None
             ),
             "seen": self.visible(me) if me is not None else self.dodger_visible(),
+            # Your team's pings: where, by whom, and how long ago (real seconds).
+            "marks": [
+                {
+                    "pos": self._latlon(m.pos),
+                    "name": m.name,
+                    "age_s": round((t - m.time) / self.cfg.time_scale, 1),
+                }
+                for m in self.marks
+                if m.role is human.role and t - m.time < MARK_REAL_S * self.cfg.time_scale
+            ],
             # Packages are the Dodgers' business: the Bounty Hunters never see them.
             "packages": [self._latlon(pkg.pos) for pkg in self.packages] if as_runner else [],
             # The package at your feet, and where it would go.
