@@ -11,7 +11,7 @@ from starlette.websockets import WebSocketDisconnect
 from fare_dodger.config import LiveConfig, NetworkConfig
 from fare_dodger.live.districts import DistrictPool
 from fare_dodger.live.game import LiveGame, Role, Seat, Status
-from fare_dodger.live.match import District, Match, Team, match_winner
+from fare_dodger.live.match import District, Match, Team, match_winner, role_for
 from fare_dodger.live.server import Limits, create_app
 from fare_dodger.live.world import World, distance
 from fare_dodger.network.timetable import Timetable
@@ -153,7 +153,7 @@ def test_a_two_v_two_match_scores_points(world: World) -> None:
     match.update()
     assert match.score == (1, 1)
     view = match.view("bob")
-    assert view["score"] == {"you": 1, "them": 1} and view["target"] == 11
+    assert view["score"] == {"you": 1, "them": 1} and view["target"] == 7  # 6 rounds x 2 points
     assert view["role"] == "hunter" and view["size"] == 2
 
 
@@ -272,3 +272,30 @@ def test_idle_rooms_close_and_health(world: World) -> None:
                 while True:
                     ws.receive_json()
         assert client.get("/healthz").json() == {"ok": True, "rooms": 0, "players": 0}
+
+
+def test_rooms_pick_a_quick_or_a_long_match(world: World) -> None:
+    client = TestClient(create_app([District("X", world)], LiveConfig(seed=1)))
+    for rounds, target in ((3, 2), (6, 4), (10, 4), (None, 4)):  # others: the long match
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"type": "solo", "role": "dodger", "rounds": rounds})
+            first = ws.receive_json()
+            assert first["match"]["regulation"] == (rounds if rounds in (3, 6) else 6)
+            assert first["match"]["target"] == target
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"type": "create", "size": 2, "rounds": rounds})
+            lobby = ws.receive_json()
+            assert lobby["rounds"] == (rounds if rounds in (3, 6) else 6)
+
+
+def test_best_of_three() -> None:
+    # One round each way, then the decider; 1-1 after three in a 2v2 goes to overtime.
+    assert [role_for(n, 3, Role.DODGER) for n in (1, 2, 3, 4)] == [
+        Role.DODGER,
+        Role.HUNTER,
+        Role.HUNTER,
+        Role.DODGER,
+    ]
+    assert match_winner(2, 0, 2, 3) is True
+    assert match_winner(1, 1, 2, 3) is None
+    assert match_winner(3, 3, 3, 3, size=2) is None
