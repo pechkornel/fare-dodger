@@ -154,7 +154,19 @@ docker compose logs -f game
 - **No CDNs:** MapLibre GL JS, three.js and the Fredoka font are served by the game itself
   (`src/fare_dodger/live/static/vendor/`, with their licences). The map tiles and label glyphs
   come from OpenFreeMap.
-- **Updating:** `git pull && docker compose up -d --build`. The cached data in `./data` is
+- **Admin page:** set `FARE_DODGER_ADMIN_TOKEN` in `.env` to a long random password
+  (`openssl rand -hex 24`), then open `/admin` and type it.
+  - **What it shows:** the running version and commit, uptime, memory, players, every game
+    (code, size, players, round and score) with a **Close** button, and the timetable in use.
+  - **Update now:** asks the server to update itself. Install the updater once with
+    `./deploy/install-updater.sh`. It adds a systemd path unit that, when the button is
+    pressed, runs `deploy/update.sh` as you: `git pull`, then
+    `docker compose up -d --build`, with your git login and Docker group. The admin page
+    shows the progress and the log. Running games are cut off, and the restart also refreshes
+    the timetable.
+  - **Locking it down:** behind Cloudflare Access, add a second Access application for the
+    path `/admin` (and `/api/admin`) that allows only your email.
+- **Updating by hand:** `./deploy/update.sh`, or `git pull && docker compose up -d --build`. The cached data in `./data` is
   reused. Networks are rebuilt automatically when the feed or the config changes.
 
 ## Architecture

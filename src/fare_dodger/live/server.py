@@ -41,10 +41,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from fare_dodger.config import LiveConfig
+from fare_dodger.live.admin import Admin, memory_mib
 from fare_dodger.live.game import Keys, LiveGame, Role, world_view
 from fare_dodger.live.match import District, Match, Team
 
@@ -106,6 +108,9 @@ class Room:
     frozen_game: LiveGame | None = None
     frozen_until: float = 0.0
     round_over_at: float | None = None
+    #: Set to close the room (with this message for its players), e.g. by the admin.
+    close_reason: str | None = None
+    created: float = field(default_factory=time.time)
 
     def frozen(self) -> bool:
         return time.monotonic() < self.frozen_until
@@ -138,7 +143,12 @@ def clean_name(value: object, fallback: str) -> str:
     return name or fallback
 
 
-def create_app(districts: list[District], cfg: LiveConfig, limits: Limits | None = None) -> FastAPI:
+def create_app(
+    districts: list[District],
+    cfg: LiveConfig,
+    limits: Limits | None = None,
+    admin: Admin | None = None,
+) -> FastAPI:
     app = FastAPI(title="Fare Dodger live", docs_url=None, redoc_url=None)
     views = [{**world_view(d.world, cfg), "name": d.name} for d in districts]
     caps = limits or Limits.from_env()
@@ -157,6 +167,72 @@ def create_app(districts: list[District], cfg: LiveConfig, limits: Limits | None
             "rooms": len(rooms),
             "players": sum(len(r.members) for r in rooms.values()),
         }
+
+    # --- admin -------------------------------------------------------------------------------
+
+    def admin_or_401(request: Request) -> Admin:
+        if admin is None:
+            raise HTTPException(404, "The admin page is off: set FARE_DODGER_ADMIN_TOKEN.")
+        if not admin.allows(request.headers.get("authorization")):
+            raise HTTPException(401, "Wrong admin password.")
+        return admin
+
+    def room_view(room: Room) -> dict[str, Any]:
+        match = room.match
+        view: dict[str, Any] = {
+            "code": room.code,
+            "size": room.size,
+            "host": room.members[room.host].name if room.host in room.members else "",
+            "players": [{"name": m.name, "team": "AB"[m.team]} for m in room.members.values()],
+            "state": "lobby" if match is None else "playing",
+            "idle_s": round(time.monotonic() - room.last_input),
+            "age_s": round(time.time() - room.created),
+        }
+        if match is not None:
+            a, b = match.score
+            view.update(
+                round=match.round_number,
+                score=[a, b],
+                district=match.districts[match.district].name,
+                over=match.winner is not None,
+            )
+        return view
+
+    @app.get("/admin", include_in_schema=False)
+    def admin_page() -> RedirectResponse:
+        return RedirectResponse("/admin.html")
+
+    @app.get("/api/admin/status")
+    def admin_status(request: Request) -> dict[str, Any]:
+        a = admin_or_401(request)
+        return {
+            "info": a.info,
+            "uptime_s": round(time.time() - a.started),
+            "memory_mib": memory_mib(),
+            "limits": {
+                "max_matches": caps.max_matches,
+                "max_per_ip": caps.max_per_ip,
+                "idle_s": caps.idle_s,
+            },
+            "players": sum(len(r.members) for r in rooms.values()),
+            "rooms": [room_view(r) for r in rooms.values()],
+            "update": a.update_state(),
+        }
+
+    @app.post("/api/admin/update")
+    def admin_update(request: Request) -> dict[str, Any]:
+        a = admin_or_401(request)
+        a.request_update()
+        return {"ok": True, "update": a.update_state()}
+
+    @app.post("/api/admin/rooms/{code}/close")
+    def admin_close(code: str, request: Request) -> dict[str, Any]:
+        admin_or_401(request)
+        room = rooms.get(code.upper())
+        if room is None:
+            raise HTTPException(404, "No such room.")
+        room.close_reason = "The admin closed this game."
+        return {"ok": True}
 
     # --- rooms -----------------------------------------------------------------------------
 
@@ -238,15 +314,11 @@ def create_app(districts: list[District], cfg: LiveConfig, limits: Limits | None
         try:
             while room.code in rooms:
                 now = time.monotonic()
-                if now - room.last_input > caps.idle_s:
+                if room.close_reason is None and now - room.last_input > caps.idle_s:
+                    room.close_reason = "Closed after two minutes without anyone playing."
+                if room.close_reason is not None:
                     for m in list(room.members.values()):
-                        await send(
-                            m,
-                            {
-                                "type": "closed",
-                                "message": "Closed after two minutes without anyone playing.",
-                            },
-                        )
+                        await send(m, {"type": "closed", "message": room.close_reason})
                         with contextlib.suppress(Exception):
                             await m.ws.close()
                     close(room)
