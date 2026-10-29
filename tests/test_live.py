@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import json
 from pathlib import Path
@@ -65,7 +66,7 @@ def solo_game(world: World, at: str, **overrides: object) -> LiveGame:
 def m1_east_at_eight(world: World) -> int:
     west = node(world, "West")
     return next(
-        d.trip for d in world.departures(west, EIGHT, 60, 5) if world.headsign(d.pattern) == "East"
+        d.trip for d in world.departures(west, EIGHT, 60, 5) if world.headsign(d.trip) == "East"
     )
 
 
@@ -609,3 +610,19 @@ def test_a_district_drawn_bigger_downloads_its_map_again(tmp_path: Path) -> None
     area = net.area.model_copy(update={"radius_m": net.area.radius_m * 1.5})
     bigger = DistrictSpec(name, net.model_copy(update={"area": area}))
     assert not DistrictLoader(loader.workspace, [bigger], LiveConfig(), osm=True).cached(0)
+
+
+def test_vehicles_show_where_they_really_go(
+    timetable: Timetable, fixture_network_config: NetworkConfig
+) -> None:
+    # The headsign was the last stop inside the district; the feed's trip_headsign says
+    # where the vehicle really goes (the mini feed has none: the last stop stands in).
+    plain = World(timetable, fixture_network_config.area)
+    trip = m1_east_at_eight(plain)
+    assert plain.headsign(trip) == "East"
+    signs = [""] * timetable.n_trips
+    signs[trip] = "Airport"
+    world = World(dataclasses.replace(timetable, trip_headsign=signs), plain.area)
+    assert world.headsign(trip) == "Airport"
+    west = node(world, "West")
+    assert any(d.headsign == "Airport" for d in world.departures(west, EIGHT, 60, 5))

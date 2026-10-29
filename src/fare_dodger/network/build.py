@@ -21,7 +21,7 @@ from fare_dodger.network.transfers import walking_transfers
 from fare_dodger.timeutil import parse_hms
 
 #: Bump whenever the build logic changes so cached networks are rebuilt.
-BUILD_VERSION = 6
+BUILD_VERSION = 7
 
 _RAIL_MODES = frozenset({Mode.METRO, Mode.SUBURBAN_RAIL})
 
@@ -164,6 +164,8 @@ def _assemble(
     pat_stops: list[int] = []
     pat_trip_ptr = [0]
     trip_ids: list[str] = []
+    trip_headsigns: list[str] = []
+    headsign_of = dict(feed.trips.select("trip_id", "trip_headsign").iter_rows())
     trip_time_ptr: list[int] = []
     trip_arr: list[int] = []
     trip_dep: list[int] = []
@@ -181,6 +183,7 @@ def _assemble(
             served[node].append((p_idx, pos))
         for trip in pattern.trips:
             trip_ids.append(trip.trip_id)
+            trip_headsigns.append(headsign_of.get(trip.trip_id) or "")
             trip_time_ptr.append(len(trip_arr))
             trip_arr.extend(trip.arrivals)
             trip_dep.extend(trip.departures)
@@ -236,6 +239,7 @@ def _assemble(
         pat_stops=pat_stops,
         pat_trip_ptr=pat_trip_ptr,
         trip_id=trip_ids,
+        trip_headsign=trip_headsigns,
         trip_time_ptr=trip_time_ptr,
         trip_arr=trip_arr,
         trip_dep=trip_dep,

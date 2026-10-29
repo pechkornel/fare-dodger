@@ -182,7 +182,7 @@ def load_feed(
         pl.col("route_short_name").fill_null(pl.col("route_id")),
     )
     trips = read_table(
-        feed_dir, "trips", ["route_id", "service_id", "trip_id"], ["direction_id"]
+        feed_dir, "trips", ["route_id", "service_id", "trip_id"], ["direction_id", "trip_headsign"]
     ).filter(pl.col("service_id").is_in(sorted(services)))
 
     stop_times_lf = (
