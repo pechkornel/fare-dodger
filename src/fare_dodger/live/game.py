@@ -1025,7 +1025,7 @@ class LiveGame:
                 "trip": r.trip,
                 "route": world.route(r.trip),
                 "mode": world.mode(r.trip).value,
-                "headsign": names[stops[-1]],
+                "headsign": world.headsign(r.trip),
                 "next_stop": names[stops[nxt]],
                 "alight_at": names[stops[r.alight_pos]] if r.alight_pos is not None else None,
                 "ticket": r.ticket,

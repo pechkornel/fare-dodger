@@ -155,7 +155,7 @@ class BotDodger:
                 leg.dep,
                 leg.route_name,
                 leg.mode,
-                world.headsign(leg.pattern),
+                world.headsign(leg.trip),
             )
         return None
 

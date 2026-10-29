@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Live game: departures and rides show where the vehicle really goes, from the feed's
+  `trip_headsign` ("15 → Gyöngyösi utca M"), not the last stop inside the district.
+  Networks rebuild once, because the timetable format is now 2.
 - Live game: the map stays over Budapest and its surroundings. The camera can't pan out of
   it, so no map tiles load for the rest of the world.
 - Live game: vehicles drive in for a moment before their first stop, growing in (fading in
