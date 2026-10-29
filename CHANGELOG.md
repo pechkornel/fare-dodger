@@ -6,7 +6,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Live game: matches are a quick best of 3 or a long best of 6, picked in the menu (for
+  solo games and new rooms). Best of 10 was too long. With 3 rounds, halftime comes after round 1.
+- Live game: districts are 1.5 times wider (2.25 times the area). Their map data downloads
+  again in the background.
+
 ### Fixed
+- Live game: bot Bounty Hunters no longer jump across the district or sprint through houses.
+  A journey ending on its arrival second left the bot at its starting station. Bots on foot
+  now always walk along the streets at jogging speed, and replan when they miss a vehicle.
 - Live game: a room no longer closes in the middle of a match after 2 minutes without a key
   pressed. A Dodger hiding still or riding a long way is playing. During a match the limit
   is five times `FARE_DODGER_IDLE_S`, so 10 minutes by default.

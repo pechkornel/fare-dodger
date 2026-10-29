@@ -53,8 +53,8 @@ teams, CS-style.
   played by bots, the hunting side always gets two extra bots, and a random team runs first.
 - **Scoring:** every Dodger is a point. Escaping scores for the runners, being caught scores
   for the hunters, so a 2v2 round can end 1–1. The hunters win the round outright by catching
-  everyone. The first team past half of the regulation points wins (6 of 10 in 1v1, 11 of 20
-  in 2v2).
+  everyone. A match is quick (best of 3) or long (best of 6), picked in the menu: the first
+  team past half of the regulation points wins (2 of 3 or 4 of 6 in 1v1).
 - **Rounds:** each round lasts about 4 real minutes (25 timetable minutes at 6× speed) and is
   played on a different Budapest district, picked at random from 21 around the city. The
   Danube is a wall: cross it on the bridges.

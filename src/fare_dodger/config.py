@@ -264,10 +264,10 @@ class LiveConfig(_Frozen):
     coffee_boost_s: int = Field(default=120, gt=0)
     #: A bit slower than the buses and trams (15-20 km/h on average), well above jogging.
     coffee_speed_kmh: float = Field(default=16.0, gt=0)
-    #: Match: the first side to win more than half of ``regulation_rounds`` takes the match.
-    #: Sides switch after half of them; at a tie after regulation, sides switch every round
-    #: until one team leads by two.
-    regulation_rounds: int = Field(default=10, ge=2, multiple_of=2)
+    #: Match: the first side to win more than half of ``regulation_rounds`` takes the match
+    #: (rooms pick 3 or 6). Sides switch after half of them (rounded down); at a tie after
+    #: regulation, sides switch every round until one team leads by two.
+    regulation_rounds: int = Field(default=6, ge=2)
     #: The human's side in the first round.
     start_role: Literal["dodger", "hunter"] = "dodger"
     #: Fixed seed for reproducible matches; ``None`` picks a new one per match.

@@ -32,6 +32,8 @@ as follows:
   - Every Dodger is one point: escaped for the runners, caught for the hunters.
   - The match goes to the first team past half the regulation points:
     `regulation_rounds × size / 2 + 1`, which is 6 in 1v1 and 11 in 2v2.
+    *Later:* best of 10 was too long. A room picks a quick match (`regulation_rounds` 3, 2 points to
+    win in 1v1) or a long one (6, 4 to win), sent as `rounds` with `create` or `solo`.
   - Sides switch at halftime. After a tie, they switch every round until one team leads by
     two points.
   - The view is per player: "you" are your team, "them" the other.

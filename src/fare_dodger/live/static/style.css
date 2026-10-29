@@ -285,6 +285,8 @@ body.in-menu #follow { display: none !important; }
 .menu-row { display: flex; align-items: center; gap: 8px; }
 .menu-row span { font-weight: 600; margin-right: auto; }
 .menu-row button { width: auto !important; flex: none; padding: 9px 14px; }
+.menu-row button.length { background: var(--paper-2); color: var(--ink); }
+.menu-row button.length.chosen { background: var(--player); color: #fff; }
 .menu-row input { flex: 1; text-transform: uppercase; letter-spacing: 3px; font-weight: 700; }
 #menu-error { margin: 10px 0 0; }
 

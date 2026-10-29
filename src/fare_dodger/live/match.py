@@ -6,7 +6,7 @@ on the hunting side. Every Dodger is worth a point: one that escapes scores for 
 one that is caught scores for the hunters (so a 2v2 round can end 1-1).
 
 The first team to more than half of the regulation points (``regulation_rounds`` times ``size``;
-6 of 10 in 1v1) takes the match. Team A plays its starting side for the first half of
+2 of 3 or 4 of 6 in 1v1) takes the match. Team A plays its starting side for the first half of
 regulation and the other side for the second half. At a tie after regulation, overtime
 rounds alternate sides every round until one team leads by two points. Every round is played
 on a district, in a shuffled order that repeats once all districts have been played.
