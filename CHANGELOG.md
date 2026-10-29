@@ -6,6 +6,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Live game: packages go to landmarks: statues, monuments, museums, churches, theatres and
+  other sights from OpenStreetMap, each with its own icon. Every destination is one or two
+  rides away. Standing at a package shows where it goes before you take it.
+  `package_max_m` is now 2,000 m. Landmarks download in the background; until a district has
+  them, its packages go to street spots. ADR 0013 addendum.
+
 ### Added
 - Live game: the whole city. There are 21 districts: the six inner ones and 15 more around
   Budapest, from Óbuda and Újpest to Csepel and Kispest, plus five on the Danube bridges.

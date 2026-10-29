@@ -295,6 +295,17 @@ function drawStatic(w) {
 
 let cafeMarkers = [];
 const parcels = { markers: [], goal: null };
+// Package destinations: an icon per kind of landmark (a flag for a plain street spot).
+const LANDMARK_ICONS = {
+  statue: "🗿", monument: "🗽", castle: "🏰", church: "⛪", building: "🏛️", fountain: "⛲",
+  mural: "🎨", museum: "🏛️", attraction: "⭐", viewpoint: "👀", theatre: "🎭",
+};
+const landmarkIcon = (kind) => LANDMARK_ICONS[kind] || "🏁";
+// "Szabadság-szobor (near Gellért tér)", or "near Gellért tér" for a street spot.
+const destination = (d) =>
+  d.landmark ? `<b>${esc(d.landmark)}</b> <span class="muted">near ${esc(d.near)}</span>`
+    : `near <b>${esc(d.near)}</b>`;
+const metres = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`);
 
 function renderParcels(s) {
   const list = s.packages || [];
@@ -314,13 +325,16 @@ function renderParcels(s) {
     if (!parcels.goal) {
       const el = document.createElement("div");
       el.className = "goal-sign";
-      el.textContent = "🏁";
+      el.textContent = landmarkIcon(s.delivery.kind);
       parcels.goal = new maplibregl.Marker({ element: el }).setLngLat(lngLat(s.delivery.pos))
         .addTo(map);
     }
     parcels.goal.setLngLat(lngLat(s.delivery.pos));
     showIfOnScreen(parcels.goal, s.delivery.pos);
-    parcels.goal.getElement().title = `Deliver here (near ${s.delivery.near})`;
+    parcels.goal.getElement().textContent = landmarkIcon(s.delivery.kind);
+    parcels.goal.getElement().title = s.delivery.landmark
+      ? `Deliver here: ${s.delivery.landmark} (near ${s.delivery.near})`
+      : `Deliver here (near ${s.delivery.near})`;
   } else if (parcels.goal) {
     parcels.goal.remove();
     parcels.goal = null;
@@ -602,13 +616,13 @@ function renderHud(s) {
   let parcel = "";
   if (s.delivery) {
     const d = s.delivery;
-    const far = d.distance_m >= 1000 ? `${(d.distance_m / 1000).toFixed(1)} km` : `${d.distance_m} m`;
-    parcel = `<div class="parcel-row">📦 Deliver near <b>${esc(d.near)}</b> · ${far} · ` +
-      `+${d.reward} Ft</div>`;
+    parcel = `<div class="parcel-row">📦 → ${landmarkIcon(d.kind)} ${destination(d)} · ` +
+      `${metres(d.distance_m)} · +${d.reward} Ft</div>`;
   } else if (s.package_here) {
+    const p = s.package_here;
     parcel = `<h3><span>📦 A package</span><span class="chip" id="take-parcel">E · ` +
-      `+${world.package_reward_ft} Ft</span></h3>` +
-      '<div class="muted">Take it and deliver it to earn money.</div>';
+      `+${p.reward} Ft</span></h3>` +
+      `<div>→ ${landmarkIcon(p.kind)} ${destination(p)} · ${metres(p.distance_m)}</div>`;
   }
   const cafe = parcel + (coffee.cafe && coffee.brewing_s == null
     ? `<h3><span>☕ ${esc(coffee.cafe)}</span>` +
@@ -1037,4 +1051,3 @@ function edgeArrow(el, pointer, label, target, s) {
 }
 
 init();
-

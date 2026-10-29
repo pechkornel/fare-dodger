@@ -28,6 +28,35 @@ shown with a ping, and delivering it earns about 1,200 Ft.
     give-away.
   - Bot Dodgers don't deliver.
 
+## Addendum (2026-10-29): landmark destinations, shown before taking
+The owner wants packages to go somewhere fun, such as statues and historic buildings, and
+to be deliverable with one or two rides. A player standing at a package should see where it
+goes.
+- **Landmarks** (`live/landmarks.py`):
+  - Named OpenStreetMap sights are downloaded once per district into
+    `data/osm/<district>/landmarks.json`.
+  - Kept: statues, busts and sculptures, fountains, murals, monuments and war memorials,
+    museums, theatres, churches, castles and city walls, historic buildings, town halls,
+    attractions and viewpoints.
+  - Left out: wall plaques, Stolpersteine, tombs and galleries.
+  - Each landmark is placed at its nearest street point (at most 80 m away), one per name.
+  - Inner Pest has 240.
+- **Destination at spawn:** a package gets its destination when it appears, so the
+  "📦 A package" hint shows it before **E** is pressed. Each landmark's kind has its own
+  icon, and the destination flag uses it. A destination must meet all of these:
+  - it is a landmark `package_min_m` to `package_max_m` away (now 600–2,000 m);
+  - it is within 500 m of a station that the timetable reaches from the package's station
+    with at most two rides within 20 minutes;
+  - no other package goes to it.
+
+  Without such a landmark, the package takes the one nearest the distance range. In
+  Inner Pest, the fastest journey to 97% of the destinations uses one or two rides.
+- **No waiting for downloads:**
+  - Landmarks are optional. They are not part of the `layers.json` marker, so a district
+    stays playable without them, and its packages go to street spots, as before.
+  - Only the background downloader fetches them. It does the playable districts first,
+    and hands the landmarks to a district already in memory, so its next packages use them.
+
 ## Also fixed with this change
 - **Result text per player:** the round's text now comes from per-player summaries
   (`LiveGame.summary`). Before, only the first human seated got the real text, so a
