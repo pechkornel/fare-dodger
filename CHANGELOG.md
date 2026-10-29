@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Live game: vehicles drive in for a moment before their first stop, growing in (fading in
+  on the flat map), and drive off after their last stop, shrinking away. They no longer pop
+  up at a stop and vanish. You can only board them during the timetabled run.
 - Live game: buying a coffee reports you to the Bounty Hunters with the usual alert,
   at that exact café. Camping in cafés was too strong.
 - Live game: matches are a quick best of 3 or a long best of 6, picked in the menu (for

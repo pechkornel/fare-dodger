@@ -542,7 +542,32 @@ def test_vehicles_report_their_heading(world: World) -> None:
     assert moving.heading == pytest.approx(0.0, abs=0.05)
     game = solo_game(world, "West")
     row = next(v for v in game.snapshot()["vehicles"] if v[0] == trip)
-    assert len(row) == 6 and row[5] == pytest.approx(standing.heading, abs=1e-3)
+    assert len(row) == 7 and row[5] == pytest.approx(standing.heading, abs=1e-3)
+    assert row[6] == 1.0  # fully shown
+
+
+def test_vehicles_drive_in_before_their_first_stop_and_away_after_their_last(
+    world: World,
+) -> None:
+    # Instead of popping up at a stop: shown (but not boardable) a little before and after.
+    trip = m1_east_at_eight(world)
+    arr, _ = world.times(trip)
+    lead = world.SHOW_LEAD_S
+
+    def shown(t: float) -> tuple[float, float] | None:
+        found = [(s.pos[0], v) for s, v in world.shown_trips(t) if s.trip == trip]
+        return found[0] if found else None
+
+    first = world.stop_point(world.trip_pattern[trip], 0)
+    assert shown(arr[0] - lead - 1) is None
+    x, vis = shown(arr[0] - lead / 2) or (0.0, 0.0)
+    assert vis == pytest.approx(0.5) and x < first[0]  # coming from the west, eastbound
+    assert world.trip_state(trip, arr[0] - lead / 2) is None  # nobody can board it yet
+    assert shown(arr[0]) == (first[0], 1.0)
+    last = world.stop_point(world.trip_pattern[trip], len(arr) - 1)
+    x, vis = shown(arr[-1] + lead / 4) or (0.0, 0.0)
+    assert vis == pytest.approx(0.75) and x > last[0]  # driving on east
+    assert shown(arr[-1] + lead + 1) is None
 
 
 def test_asking_to_get_off_can_be_cancelled(world: World) -> None:

@@ -91,6 +91,12 @@ class Departure:
 class World:
     #: A vehicle this many seconds from a stop still counts as standing there.
     AT_STOP_GRACE_S = 5
+    #: Vehicles are shown driving in this long before their first stop and away this long
+    #: after their last (timetable seconds), growing in and shrinking out, instead of
+    #: popping up and vanishing at a stop.
+    SHOW_LEAD_S = 20
+    #: Speed of that drive (m/s, about 30 km/h).
+    SHOW_SPEED_MPS = 8.0
 
     def __init__(self, tt: Timetable, area: Area, hops: Hops | None = None) -> None:
         self.tt = tt
@@ -328,6 +334,35 @@ class World:
                 if state is not None:
                     states.append(state)
         return states
+
+    def shown_trips(self, t: float) -> list[tuple[TripState, float]]:
+        """The vehicles to draw at time ``t``, each with how much of it shows (0 to 1): the
+        active trips in full, and the ones about to start or just finished driving in from or
+        away along their direction of travel. Only for drawing: nobody can board those."""
+        lead = self.SHOW_LEAD_S
+        shown: list[tuple[TripState, float]] = []
+        for trip, (arr, _) in enumerate(self._times):
+            if t < arr[0] - lead or t > arr[-1] + lead:
+                continue
+            pattern = self.trip_pattern[trip]
+            if t < arr[0]:
+                ahead, pos = arr[0] - t, self._stop_points[pattern][0]
+                heading = self.hop_heading(pattern, 0, 0.0) if len(arr) > 1 else 0.0
+                back = -ahead * self.SHOW_SPEED_MPS
+                x, y = pos[0] + back * math.cos(heading), pos[1] + back * math.sin(heading)
+                shown.append((TripState(trip, (x, y), 0, False, heading), 1.0 - ahead / lead))
+            elif t > arr[-1]:
+                gone, last = t - arr[-1], len(arr) - 1
+                pos = self._stop_points[pattern][last]
+                heading = self.hop_heading(pattern, last - 1, 1.0) if last > 0 else 0.0
+                on = gone * self.SHOW_SPEED_MPS
+                x, y = pos[0] + on * math.cos(heading), pos[1] + on * math.sin(heading)
+                shown.append((TripState(trip, (x, y), last, False, heading), 1.0 - gone / lead))
+            else:
+                active = self.trip_state(trip, t)
+                if active is not None:
+                    shown.append((active, 1.0))
+        return shown
 
     def departures(self, node: int, t: float, horizon_s: float, limit: int) -> list[Departure]:
         """The next vehicles leaving ``node`` (not ending there) within ``horizon_s``."""
