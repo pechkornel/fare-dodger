@@ -303,8 +303,9 @@ class World:
     def mode(self, trip: int) -> Mode:
         return self.tt.pattern_mode(self.trip_pattern[trip])
 
-    def headsign(self, pattern: int) -> str:
-        return self.tt.node_name[self._stops[pattern][-1]]
+    def headsign(self, trip: int) -> str:
+        """Where ``trip`` really goes (often beyond the district), else its last stop here."""
+        return self.tt.trip_headsign[trip] or self.tt.node_name[self.stops(trip)[-1]]
 
     def trip_state(self, trip: int, t: float) -> TripState | None:
         """Where ``trip`` is at time ``t``, or ``None`` before its first or after its last stop."""
@@ -384,7 +385,7 @@ class World:
                             time,
                             tt.pat_route_name[p],
                             tt.pattern_mode(p),
-                            self.headsign(p),
+                            self.headsign(trip),
                         )
                     )
         found.sort(key=lambda d: (d.time, d.route, d.trip))

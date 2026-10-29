@@ -16,7 +16,7 @@ import numpy as np
 
 from fare_dodger.modes import VEHICLE_MODES, Mode
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 _INT_ARRAYS = (
     "node_mode_mask",
@@ -36,7 +36,7 @@ _INT_ARRAYS = (
     "fp_dur",
 )
 _FLOAT_ARRAYS = ("node_lat", "node_lon")
-_STR_LISTS = ("node_name", "pat_route_id", "pat_route_name", "trip_id")
+_STR_LISTS = ("node_name", "pat_route_id", "pat_route_name", "trip_id", "trip_headsign")
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +81,9 @@ class Timetable:
     pat_stops: list[int]
     pat_trip_ptr: list[int]
     trip_id: list[str]
+    #: Where each trip really goes (GTFS ``trip_headsign``; "" if the feed has none), which
+    #: can be well beyond the last stop kept in the network's area.
+    trip_headsign: list[str]
     trip_time_ptr: list[int]
     trip_arr: list[int]
     trip_dep: list[int]
