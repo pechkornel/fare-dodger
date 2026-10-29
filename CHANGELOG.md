@@ -35,6 +35,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   again in the background.
 
 ### Fixed
+- Live game: the minimap of a circular district (15 of the 21) is sized to the whole
+  district and draws its outline. It was sized to the stations only, so you could walk off
+  its edge.
 - Live game: bot Bounty Hunters no longer jump across the district or sprint through houses.
   A journey ending on its arrival second left the bot at its starting station. Bots on foot
   now always walk along the streets at jogging speed, and replan when they miss a vehicle.
