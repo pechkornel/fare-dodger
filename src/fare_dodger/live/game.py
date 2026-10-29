@@ -511,12 +511,19 @@ class LiveGame:
             p.money -= cfg.coffee_price_ft
             p.waiting_for = None
             p.brewing_until = self.t + cfg.coffee_brew_s
-            self._emit(
-                "coffee",
-                f"One coffee at {self.world.cafes[cafe].name} ({cfg.coffee_price_ft} Ft), "
-                "coming up…",
-                to,
-            )
+            name = self.world.cafes[cafe].name
+            self._emit("coffee", f"One coffee at {name} ({cfg.coffee_price_ft} Ft), coming up…", to)
+            # Camping in cafés was too strong: the barista tells the Bounty Hunters which one.
+            runner, node = self._runner_of(p), self.world.nearest_node(p.pos)
+            if runner is not None and node is not None:
+                self._report(
+                    runner,
+                    node,
+                    "☕ The barista reported",
+                    "☕ The barista reported",
+                    place=name,
+                    until=p.brewing_until,
+                )
 
     def buy_ticket(self, pid: str | None = None) -> None:
         """Buy a single ticket at the stop's machine."""
@@ -842,17 +849,27 @@ class LiveGame:
         )
 
     def _report(
-        self, runner: Runner, node: int, as_runner: str, as_hunter: str, tell_hunters: bool = True
+        self,
+        runner: Runner,
+        node: int,
+        as_runner: str,
+        as_hunter: str,
+        tell_hunters: bool = True,
+        *,
+        place: str | None = None,
+        until: float | None = None,
     ) -> None:
-        """Tell the Bounty Hunters where ``runner`` is (and until when, if held there)."""
+        """Tell the Bounty Hunters where ``runner`` is (and until when, if held there):
+        near station ``node``, or exactly at ``place`` when given."""
         d = runner.traveller
-        until = d.held_until if d.held_until is not None else 0.0
+        if until is None:
+            until = d.held_until if d.held_until is not None else 0.0
         self.pings.append(Ping(int(self.t), d.pos, node, runner.index, until))
-        place = self.world.tt.node_name[node]
+        where = f"at {place}" if place else f"near {self.world.tt.node_name[node]}"
         if runner.player is not None:
-            self._emit("ping", f"{as_runner} you near {place}!", [runner.player])
+            self._emit("ping", f"{as_runner} you {where}!", [runner.player])
         hunters = [pid for pid, h in self.humans.items() if h.role is Role.HUNTER]
-        self._emit("ping", f"{as_hunter} {self._called(runner)} near {place}!", hunters)
+        self._emit("ping", f"{as_hunter} {self._called(runner)} {where}!", hunters)
         if tell_hunters:
             self.hunters.on_pings(self.latest_pings())
 

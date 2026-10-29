@@ -6,6 +6,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Live game: buying a coffee reports you to the Bounty Hunters with the usual alert,
+  at that exact café. Camping in cafés was too strong.
+
 ### Fixed
 - Live game: a room no longer closes in the middle of a match after 2 minutes without a key
   pressed. A Dodger hiding still or riding a long way is playing. During a match the limit
