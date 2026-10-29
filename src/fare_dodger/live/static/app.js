@@ -964,12 +964,24 @@ function minimapPath(c, points) {
   });
 }
 
+// The district's outline as [lat, lon] points: its polygon, or its circle (most districts).
+function areaRing(area) {
+  if (area.kind === "polygon") return area.vertices;
+  const dLat = area.radius_m / 111320;
+  const dLon = dLat / Math.cos((area.center_lat * Math.PI) / 180);
+  return Array.from({ length: 64 }, (_, i) => {
+    const a = (i / 64) * 2 * Math.PI;
+    return [area.center_lat + dLat * Math.sin(a), area.center_lon + dLon * Math.cos(a)];
+  });
+}
+
 function minimapBase() {
-  // The district outline, lines, stations and cafés, drawn once per district.
+  // The district outline, lines, stations and cafés, drawn once per district. Sized to the
+  // whole district: before, circle districts were sized to their stations only, so you
+  // could walk off the minimap's edge.
   const size = 220 * mini.dpr;
   const pad = 14 * mini.dpr;
-  const area = world.area;
-  const ring = area.kind === "polygon" ? area.vertices : world.stations.map((st) => st.pos);
+  const ring = areaRing(world.area);
   const kx = Math.cos((world.center[0] * Math.PI) / 180);
   const xs = ring.map(([, lon]) => lon * kx);
   const ys = ring.map(([lat]) => lat);
@@ -985,17 +997,15 @@ function minimapBase() {
   const c = base.getContext("2d");
   c.fillStyle = "#e9dcc0";
   c.fillRect(0, 0, size, size);
-  if (area.kind === "polygon") {
-    minimapPath(c, area.vertices);
-    c.closePath();
-    c.fillStyle = "#fffaf0";
-    c.fill();
-    c.lineWidth = 2 * mini.dpr;
-    c.setLineDash([6 * mini.dpr, 4 * mini.dpr]);
-    c.strokeStyle = INK;
-    c.stroke();
-    c.setLineDash([]);
-  }
+  minimapPath(c, ring);
+  c.closePath();
+  c.fillStyle = "#fffaf0";
+  c.fill();
+  c.lineWidth = 2 * mini.dpr;
+  c.setLineDash([6 * mini.dpr, 4 * mini.dpr]);
+  c.strokeStyle = INK;
+  c.stroke();
+  c.setLineDash([]);
   c.lineCap = c.lineJoin = "round";
   c.globalAlpha = 0.7;
   c.lineWidth = 2.2 * mini.dpr;
