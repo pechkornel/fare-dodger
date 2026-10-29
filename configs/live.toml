@@ -48,12 +48,13 @@ inspected_share = 0.35       # trips with ticket inspectors aboard (hidden until
 fine_ft = 1000               # caught without a ticket; game over if you cannot pay
 fine_hold_s = 60             # held at the next stop while the fine is processed
 fine_alerts_hunters = true   # the inspectors report you to the Bounty Hunters
-# Packages (the Dodgers only): accept one with E, deliver it to its destination for the reward.
+# Packages (the Dodgers only): each goes to a landmark (a statue, monument, museum...) that one
+# or two rides reach. Stand at one to see where; E takes it; deliver it for the reward.
 packages_waiting = 3
 package_reward_ft = 1200
 package_radius_m = 25.0
 package_min_m = 600.0
-package_max_m = 1600.0
+package_max_m = 2000.0
 # Coffee (the Dodger only): real cafés from OpenStreetMap, a few per district. Press C at one:
 # 500 Ft, 3 real seconds standing still, then 20 real seconds running almost as fast as a bus.
 cafes_per_district = 4

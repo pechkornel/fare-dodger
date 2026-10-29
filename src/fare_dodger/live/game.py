@@ -41,6 +41,13 @@ DEPARTURE_LIMIT = 6
 MAX_SUBSTEP_S = 1.0
 #: Blocked by a wall, try these turns (radians) to slide along it, the straight way first.
 SLIDE_ANGLES = (0.0, 0.6, -0.6, 1.2, -1.2)
+#: A package's destination is a station reachable from it with at most this many rides,
+#: within this long (timetable seconds), and the landmark is this close to that station.
+PACKAGE_MAX_RIDES = 2
+PACKAGE_HORIZON_S = 20 * 60
+PACKAGE_STATION_M = 500.0
+#: Street spots tried as destinations in a district without landmarks.
+PACKAGE_STREET_SPOTS = 30
 
 
 class Status(StrEnum):
@@ -135,13 +142,26 @@ class Seat:
 
 @dataclass
 class Package:
-    """A parcel waiting to be picked up, or carried to ``dest`` by a Dodger."""
+    """A parcel waiting to be picked up, or carried to ``dest`` by a Dodger. The destination
+    is known from the start, so it shows before the package is taken."""
 
     pos: Point
     reward: int
-    dest: Point | None = None
+    dest: Point
     #: The station nearest the destination, to name it.
-    near: str = ""
+    near: str
+    #: The landmark at the destination ("" for a plain street spot), and its kind.
+    landmark: str = ""
+    kind: str = ""
+
+    def view(self, origin: Point) -> dict[str, Any]:
+        return {
+            "landmark": self.landmark,
+            "kind": self.kind,
+            "near": self.near,
+            "reward": self.reward,
+            "distance_m": round(distance(origin, self.dest)),
+        }
 
 
 @dataclass
@@ -352,8 +372,57 @@ class LiveGame:
 
     def _add_package(self) -> None:
         spot = self.world.random_spot(self._parcels)
-        if spot is not None:
-            self.packages.append(Package(spot, self.cfg.package_reward_ft))
+        if spot is None:
+            return
+        dest = self._destination(spot)
+        if dest is not None:
+            self.packages.append(dest)
+
+    def _destination(self, spot: Point) -> Package | None:
+        """A package at ``spot`` with a destination: a landmark (a street spot in a district
+        without any) ``package_min_m`` to ``package_max_m`` away, near a station that the
+        timetable reaches from the package with one or two rides. Landmarks other packages
+        already go to are skipped. Without such a place, the one nearest the distance range."""
+        world, cfg, rng = self.world, self.cfg, self._parcels
+        names, xy = world.tt.node_name, world.node_xy
+        origin = world.nearest_node(spot)
+        reached = (
+            reachable(
+                world.tt,
+                [origin],
+                int(self.t),
+                PACKAGE_HORIZON_S,
+                max_rounds=PACKAGE_MAX_RIDES,
+            ).arrivals()
+            if origin is not None
+            else {}
+        )
+        taken = {p.landmark for p in self.packages} | {
+            r.package.landmark for r in self.runners if r.package is not None
+        }
+        places = [(m.pos, m.name, m.kind) for m in world.landmarks if m.name not in taken]
+        if not places:
+            spots = (world.random_spot(rng) for _ in range(PACKAGE_STREET_SPOTS))
+            places = [(p, "", "") for p in spots if p is not None]
+        rng.shuffle(places)
+        best: tuple[float, Point, str, str] | None = None
+        for pos, name, kind in places:
+            gap = distance(pos, spot)
+            off = max(cfg.package_min_m - gap, gap - cfg.package_max_m, 0.0)
+            node = world.nearest_node(pos)
+            if node is None:
+                continue
+            if off == 0.0 and node in reached and distance(xy[node], pos) <= PACKAGE_STATION_M:
+                best = (0.0, pos, name, kind)
+                break
+            if best is None or off < best[0]:
+                best = (off, pos, name, kind)
+        if best is None:
+            return None
+        _, pos, name, kind = best
+        node = world.nearest_node(pos)
+        near = names[node] if node is not None else "?"
+        return Package(spot, cfg.package_reward_ft, pos, near, name, kind)
 
     def package_near(self, who: Traveller) -> Package | None:
         """A waiting package within reach of ``who`` (on foot), if any."""
@@ -363,39 +432,21 @@ class LiveGame:
         return next((pkg for pkg in self.packages if distance(pkg.pos, who.pos) <= reach), None)
 
     def _accept_package(self, runner: Runner, pkg: Package) -> None:
-        """``runner`` takes ``pkg``: it gets a destination, and a new package appears."""
-        cfg, world = self.cfg, self.world
-        best: Point | None = None
-        for _ in range(40):
-            spot = world.random_spot(self._parcels)
-            if spot is None:
-                continue
-            gap = distance(spot, pkg.pos)
-            if cfg.package_min_m <= gap <= cfg.package_max_m:
-                best = spot
-                break
-            if best is None or abs(gap - cfg.package_min_m) < abs(
-                distance(best, pkg.pos) - cfg.package_min_m
-            ):
-                best = spot
-        if best is None:
-            return
-        node = world.nearest_node(best)
-        pkg.dest = best
-        pkg.near = world.tt.node_name[node] if node is not None else "?"
+        """``runner`` takes ``pkg``, and a new package appears elsewhere."""
         self.packages.remove(pkg)
         runner.package = pkg
         self._add_package()
+        to = f"{pkg.landmark} (near {pkg.near})" if pkg.landmark else f"near {pkg.near}"
         self._tell(
             runner.traveller,
             "package",
-            f"📦 Package accepted: take it near {pkg.near} for {pkg.reward} Ft.",
+            f"📦 Package accepted: take it to {to} for {pkg.reward} Ft.",
         )
 
     def _deliver(self) -> None:
         for runner in self.in_play():
             pkg, d = runner.package, runner.traveller
-            if pkg is None or pkg.dest is None or d.ride is not None:
+            if pkg is None or d.ride is not None:
                 continue
             if distance(d.pos, pkg.dest) <= self.cfg.package_radius_m:
                 d.money += pkg.reward
@@ -1096,19 +1147,19 @@ class LiveGame:
             "seen": self.visible(me) if me is not None else self.dodger_visible(),
             # Packages are the Dodgers' business: the Bounty Hunters never see them.
             "packages": [self._latlon(pkg.pos) for pkg in self.packages] if as_runner else [],
-            "package_here": as_runner
-            and not out
-            and self.package_near(p) is not None
-            and me is not None
-            and me.package is None,
+            # The package at your feet, and where it would go.
+            "package_here": (
+                here.view(p.pos)
+                if as_runner
+                and not out
+                and me is not None
+                and me.package is None
+                and (here := self.package_near(p)) is not None
+                else None
+            ),
             "delivery": (
-                {
-                    "pos": self._latlon(me.package.dest),
-                    "near": me.package.near,
-                    "reward": me.package.reward,
-                    "distance_m": round(distance(p.pos, me.package.dest)),
-                }
-                if me is not None and me.package is not None and me.package.dest is not None
+                {"pos": self._latlon(me.package.dest), **me.package.view(p.pos)}
+                if me is not None and me.package is not None
                 else None
             ),
             "runners": {

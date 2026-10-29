@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import tomllib
+import weakref
 import webbrowser
 from collections import Counter
 from collections.abc import Callable
@@ -33,6 +34,7 @@ from fare_dodger.live.buildings import (
 )
 from fare_dodger.live.cafes import CAFES_VERSION, download_cafes, pick_cafes, read_cafes
 from fare_dodger.live.districts import DistrictPool, DistrictSpec
+from fare_dodger.live.landmarks import download_landmarks, place_landmarks, read_landmarks
 from fare_dodger.live.server import create_app
 from fare_dodger.live.streets import (
     STREETS_VERSION,
@@ -344,6 +346,8 @@ class DistrictLoader:
     ) -> None:
         self.workspace, self.specs, self.cfg, self.osm = workspace, specs, cfg, osm
         self._locks = [threading.Lock() for _ in specs]
+        #: The worlds built and still in use, to hand them landmarks downloaded later.
+        self._built: weakref.WeakValueDictionary[int, World] = weakref.WeakValueDictionary()
         self.versions = {
             "cafes": CAFES_VERSION,
             **(
@@ -364,6 +368,26 @@ class DistrictLoader:
             return False
         return all(found.get(k) == v for k, v in self.versions.items())
 
+    def _landmarks_at(self, i: int) -> tuple[Path, BBox]:
+        spec = self.specs[i]
+        bbox = covering_bbox([area_bbox(spec.net.area)])
+        return self.workspace.osm_dir(spec.slug) / "landmarks.json", bbox
+
+    def has_landmarks(self, i: int) -> bool:
+        return read_landmarks(*self._landmarks_at(i)) is not None
+
+    def fetch_landmarks(self, i: int) -> None:
+        """Download district ``i``'s landmarks if missing, and hand them to its world if it is
+        loaded already, so its next packages go to them."""
+        path, bbox = self._landmarks_at(i)
+        with self._locks[i]:
+            found = _load_osm_extra("landmarks", path, bbox, read_landmarks, download_landmarks)
+        world = self._built.get(i)
+        if found is not None and world is not None and not world.landmarks:
+            world.landmarks = place_landmarks(found, world)
+            name = self.specs[i].name
+            typer.echo(f"  {name}: {len(world.landmarks)} landmarks for packages", err=True)
+
     def layers(self, i: int) -> dict[str, Any]:
         """District ``i``'s OpenStreetMap layers, downloading the missing ones."""
         spec = self.specs[i]
@@ -372,7 +396,10 @@ class DistrictLoader:
         get = _load_osm_extra
         with self._locks[i]:  # the warmer and a starting round never download twice
             out: dict[str, Any] = {
-                "cafes": get("cafés", folder / "cafes.json", bbox, read_cafes, download_cafes)
+                "cafes": get("cafés", folder / "cafes.json", bbox, read_cafes, download_cafes),
+                # Optional and never waited for: only the warmer downloads them (see
+                # fetch_landmarks). Without them, packages go to street spots.
+                "landmarks": read_landmarks(folder / "landmarks.json", bbox),
             }
             if self.osm:
                 out["streets"] = get(
@@ -402,6 +429,7 @@ class DistrictLoader:
                 StreetGraph.from_osm(nodes, ways, world.proj.to_xy, spec.net.area.contains)
             )
         world.cafes = pick_cafes(layers["cafes"] or [], world, cfg.cafes_per_district)
+        world.landmarks = place_landmarks(layers["landmarks"] or [], world)
         if layers.get("buildings"):
             # Stops, stations and cafés stay reachable even when drawn inside a footprint.
             reachable_points = [
@@ -418,7 +446,7 @@ class DistrictLoader:
             (x0, y0), (x1, y1) = world.proj.to_xy(s, w), world.proj.to_xy(n, e)
             world.water = WaterMask.from_latlon(layers["water"], world.proj.to_xy, (x0, y0, x1, y1))
         info = f", {len(world.streets)} street nodes" if world.streets else ""
-        info += f", {len(world.cafes)} cafés"
+        info += f", {len(world.cafes)} cafés, {len(world.landmarks)} landmarks"
         if world.buildings is not None:
             info += f", {len(world.buildings)} buildings"
         if world.water is not None:
@@ -428,20 +456,25 @@ class DistrictLoader:
             f"({time.perf_counter() - started:.1f}s)",
             err=True,
         )
+        self._built[i] = world
         return world
 
     def warm(self) -> None:
         """Download every district's layers, one after the other (a background thread), so
-        later rounds do not wait for Overpass."""
+        later rounds do not wait for Overpass. Landmarks for the playable districts come
+        first: they are one small query each."""
         for attempt in range(WARM_PASSES):
-            missing = [i for i in range(len(self.specs)) if not self.cached(i)]
+            missing = [
+                i for i in range(len(self.specs)) if not self.cached(i) or not self.has_landmarks(i)
+            ]
             if not missing:
                 return
             if attempt:
                 time.sleep(WARM_RETRY_S)  # Overpass was busy: try the failures again later
-            for i in missing:
+            for i in sorted(missing, key=lambda i: not self.cached(i)):
                 try:
                     self.layers(i)
+                    self.fetch_landmarks(i)
                 except Exception as exc:  # the warmer must never stop the server
                     name = self.specs[i].name
                     typer.echo(f"  {name}: OpenStreetMap download failed ({exc})", err=True)

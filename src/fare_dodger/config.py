@@ -243,14 +243,14 @@ class LiveConfig(_Frozen):
     fine_hold_s: int = Field(default=60, ge=0)
     #: The inspectors report a fined Dodger's position to the Bounty Hunters.
     fine_alerts_hunters: bool = True
-    #: Packages (the Dodgers only): ``packages_waiting`` wait around the district; accepting
-    #: one (E, within ``package_radius_m``) gives a destination ``package_min_m`` to
-    #: ``package_max_m`` away, and delivering it earns ``package_reward_ft``.
+    #: Packages (the Dodgers only): ``packages_waiting`` wait around the district, each going
+    #: to a landmark ``package_min_m`` to ``package_max_m`` away that one or two rides reach.
+    #: Take one with E (within ``package_radius_m``); delivering it earns ``package_reward_ft``.
     packages_waiting: int = Field(default=3, ge=0)
     package_reward_ft: int = Field(default=1200, ge=0)
     package_radius_m: float = Field(default=25.0, gt=0)
     package_min_m: float = Field(default=600.0, ge=0)
-    package_max_m: float = Field(default=1600.0, gt=0)
+    package_max_m: float = Field(default=2000.0, gt=0)
     #: Coffee (the Dodger only): bought at a café for ``coffee_price_ft``, made in
     #: ``coffee_brew_s`` (standing still), then running at ``coffee_speed_kmh`` for
     #: ``coffee_boost_s`` (timetable seconds; at 6x, 3 and 20 real seconds).
