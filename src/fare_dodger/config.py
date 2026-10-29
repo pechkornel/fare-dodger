@@ -212,11 +212,11 @@ class LiveConfig(_Frozen):
     """Real-time prototype: one human Dodger walking and riding against bot Bounty Hunters."""
 
     start_time: str = "08:00"
-    duration_minutes: int = Field(default=25, gt=0)
+    duration_minutes: int = Field(default=35, gt=0)
     #: Timetable seconds that pass per real second.
-    time_scale: float = Field(default=6.0, gt=0)
+    time_scale: float = Field(default=9.0, gt=0)
     #: The Bounty Hunters learn the Dodger's position this often (timetable seconds).
-    ping_every_s: int = Field(default=180, gt=0)
+    ping_every_s: int = Field(default=270, gt=0)
     #: The Bounty Hunters always outnumber the Dodgers by this many (bots fill the places).
     hunter_extra: int = Field(default=2, ge=0)
     #: Real seconds of countdown before each round, while nobody can move.
@@ -242,7 +242,7 @@ class LiveConfig(_Frozen):
     #: cannot pay it all pays what they have and is taken to the district's jail instead,
     #: held there ``jail_s`` *real* seconds, with the Bounty Hunters told where it is.
     fine_ft: int = Field(default=1000, ge=0)
-    fine_hold_s: int = Field(default=60, ge=0)
+    fine_hold_s: int = Field(default=90, ge=0)
     jail_s: float = Field(default=30.0, ge=0)
     #: The inspectors report a fined Dodger's position to the Bounty Hunters.
     fine_alerts_hunters: bool = True
@@ -256,12 +256,12 @@ class LiveConfig(_Frozen):
     package_max_m: float = Field(default=2000.0, gt=0)
     #: Coffee (the Dodger only): bought at a café for ``coffee_price_ft``, made in
     #: ``coffee_brew_s`` (standing still), then running at ``coffee_speed_kmh`` for
-    #: ``coffee_boost_s`` (timetable seconds; at 6x, 3 and 20 real seconds).
+    #: ``coffee_boost_s`` (timetable seconds; at 9x, 3 and 20 real seconds).
     cafes_per_district: int = Field(default=4, ge=0)
     cafe_radius_m: float = Field(default=25.0, gt=0)
     coffee_price_ft: int = Field(default=500, ge=0)
-    coffee_brew_s: int = Field(default=18, ge=0)
-    coffee_boost_s: int = Field(default=120, gt=0)
+    coffee_brew_s: int = Field(default=27, ge=0)
+    coffee_boost_s: int = Field(default=180, gt=0)
     #: A bit slower than the buses and trams (15-20 km/h on average), well above jogging.
     coffee_speed_kmh: float = Field(default=16.0, gt=0)
     #: Match: the first side to win more than half of ``regulation_rounds`` takes the match
