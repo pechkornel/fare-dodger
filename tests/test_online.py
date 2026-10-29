@@ -78,8 +78,14 @@ def test_views_are_per_player(world: World) -> None:
     game = two_v_two(world)
     ann, bob = game.snapshot("ann"), game.snapshot("bob")
     assert ann["role"] == "dodger" and bob["role"] == "hunter"
-    # The Dodgers always see every Bounty Hunter, Bob included.
-    assert len(ann["hunters"]) == 3 + 1
+    # A Dodger sees no Bounty Hunter far away (the start keeps them apart), only how far the
+    # nearest one is; one walking up comes into view.
+    assert ann["hunters"] == [] and ann["nearest_hunter_m"] > game.cfg.see_radius_m
+    x, y = game.runners[0].traveller.pos
+    game.humans["bob"].traveller.pos = (x + game.cfg.see_radius_m - 10, y)
+    close = game.snapshot("ann")
+    assert [h.get("name") for h in close["hunters"]] == ["Bob"]
+    ann = game.snapshot("ann")
     assert [d["name"] for d in ann["dodgers"]] == ["Dodger bot"]  # the teammate
     # Bob sees only the Dodgers in sight (none at the start) and his three bot teammates.
     assert bob["dodgers"] == [] and len(bob["hunters"]) == 3

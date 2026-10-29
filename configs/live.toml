@@ -38,6 +38,7 @@ freeze_s = 3.0               # real seconds of countdown before each round
 walk_speed_kmh = 10.0        # a brisk jog; walking is along the streets
 catch_radius_m = 25.0        # Bounty Hunter on foot this close to an exposed Dodger
 sight_radius_m = 100.0       # Bounty Hunters on foot chase a Dodger on foot within this
+see_radius_m = 200.0         # the sides see each other on the map only this close (zoomed in)
 board_radius_m = 40.0        # stand this close to a stop to wait for a vehicle
 min_start_distance_min = 8
 # Tickets and fares. Buy a ticket at a stop (T), or ride without one and risk an inspection.

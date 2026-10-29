@@ -43,6 +43,8 @@
     <span class="team you">You <b id="score-you">0</b></span>
     <span class="timer"><b id="round-timer">0:00</b><small id="round-label"></small></span>
     <span class="team bots"><b id="score-bots">0</b> <span id="them-name">Bots</span></span>
+    <!-- The Dodger's only sense of the Bounty Hunters beyond the street: how far. -->
+    <span id="threat" class="threat" hidden></span>
   </div>
 
   <canvas id="minimap" class="panel" width="220" height="220" hidden></canvas>
@@ -145,7 +147,9 @@
             halftime, and after a tie every round until one team leads by two.</li>
           <li><b>Dodger:</b> survive the round. Jog the streets (freely across parks), ride real
             trams, buses and metros, and stay out of the Bounty Hunters' reach. Buy a ticket
-            (<b>T</b>) or risk the inspectors; grab a coffee (<b>C</b>) at a ☕ to run fast.</li>
+            (<b>T</b>) or risk the inspectors; grab a coffee (<b>C</b>) at a ☕ to run fast.
+            You see the Bounty Hunters only up close and zoomed in; the top bar shows how far
+            the nearest one is (red: close, green: far).</li>
           <li><b>Bounty Hunter:</b> catch the Dodger on foot or on the same vehicle. You only see
             them up close; follow the reports on the minimap and the arrow at the screen edge.</li>
           <li><b>WASD</b> move (up is the top of your screen) · <b>right-drag</b> turn the map ·

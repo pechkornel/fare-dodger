@@ -228,6 +228,9 @@ class LiveConfig(_Frozen):
     catch_radius_m: float = Field(default=25.0, gt=0)
     #: A Bounty Hunter on foot spots a Dodger on foot within this distance and gives chase.
     sight_radius_m: float = Field(default=100.0, ge=0)
+    #: The two sides see each other on the map only this close (and only zoomed in): the
+    #: Dodgers otherwise just know how far the nearest Bounty Hunter is.
+    see_radius_m: float = Field(default=200.0, gt=0)
     #: How close to a stop the Dodger must stand to wait for and board a vehicle.
     board_radius_m: float = Field(default=40.0, gt=0)
     #: Minimum travel time (minutes) from every Bounty Hunter to the Dodger at the start.

@@ -500,8 +500,9 @@ function renderVehicles(list, myTrip) {
 }
 
 function renderHunters(list, role) {
-  // As the Dodger these are the enemy; as a Bounty Hunter, your bot teammates.
+  // As the Dodger these are the enemy (only the close ones); as a Bounty Hunter, the team.
   const team = role === "hunter" ? " team" : "";
+  while (markers.hunters.length > list.length) markers.hunters.pop().remove();
   list.forEach((hunter, i) => {
     const cls = `toon hunter${team}${hunter.riding ? " riding" : ""}` +
       `${hunter.chasing ? " chasing" : ""}`;
@@ -530,7 +531,9 @@ function renderDodgers(list, role) {
 
 // Sight circles of the Bounty Hunters on foot and the last radar ping, drawn on the ground.
 function renderGround(s) {
-  const features = s.hunters.filter((h) => !h.riding).map((h) => feature(
+  // A Dodger sees the Bounty Hunters (and so their circles) only zoomed in close.
+  const close = s.role === "hunter" || map.getZoom() >= SWITCH_ZOOM;
+  const features = s.hunters.filter((h) => !h.riding && close).map((h) => feature(
     { type: "Polygon", coordinates: [circle(h.pos, world.sight_radius_m)] }, { kind: "sight" }));
   if (s.ping) {
     const fade = Math.max(0.15, 1 - s.ping.age_s / world.ping_every_s);
@@ -602,9 +605,18 @@ function renderHud(s) {
     $("nearest").className = s.seen ? "danger" : "";
   } else {
     const near = s.nearest_hunter_m;
-    $("nearest").textContent =
-      `Nearest Bounty Hunter ${near >= 1000 ? (near / 1000).toFixed(1) + " km" : near + " m"}`;
+    const far = near >= 1000 ? (near / 1000).toFixed(1) + " km" : near + " m";
+    $("nearest").textContent = `Nearest Bounty Hunter ${far}`;
     $("nearest").className = near <= world.sight_radius_m * 2 ? "danger" : "";
+  }
+  // The Dodger's top-bar sense of danger: red close, green far, neutral between.
+  const threat = $("threat");
+  threat.hidden = hunter || s.status !== "running" || s.nearest_hunter_m === null;
+  if (!threat.hidden) {
+    const near = s.nearest_hunter_m;
+    threat.textContent = `🤠 ${near >= 1000 ? (near / 1000).toFixed(1) + " km" : near + " m"}`;
+    threat.className = "threat" +
+      (near <= world.see_radius_m * 1.5 ? " danger" : near >= world.see_radius_m * 4 ? " safe" : "");
   }
 
   let status;
@@ -1020,7 +1032,6 @@ function drawMinimap(s) {
       c.fillText("?", x, y);
     }
     for (const h of s.hunters) miniDot(c, h.pos, "#ffa8a8", 4);
-    for (const d of s.dodgers) if (!d.caught) miniDot(c, d.pos, "#ffd43b", 5);
     miniDot(c, s.player.pos, "#fa5252", 5.5, "#fff");
   } else {
     for (const pos of s.packages || []) miniDot(c, pos, "#ffd43b", 3.5);

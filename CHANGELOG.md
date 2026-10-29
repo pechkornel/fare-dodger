@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Live game: the two sides see each other only up close (200 m) and zoomed in. The Dodger's
+  top bar shows how far the nearest Bounty Hunter is, red when close and green when far
+  (ADR 0017).
 - Live game: departures and rides show where the vehicle really goes, from the feed's
   `trip_headsign` ("15 → Gyöngyösi utca M"), not the last stop inside the district.
   Networks rebuild once, because the timetable format is now 2.
