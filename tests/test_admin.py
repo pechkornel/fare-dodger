@@ -63,6 +63,7 @@ def test_admin_needs_the_password(world: World, tmp_path: Path) -> None:
     status = client.get("/api/admin/status", headers=AUTH).json()
     assert status["info"]["commit"] == "abc1234" and status["rooms"] == []
     assert status["update"] == {"state": "never", "pending": False}
+    assert status["districts"] == {"loaded": ["X"], "playable": 1, "total": 1}
     assert client.get("/admin", follow_redirects=False).headers["location"] == "/admin.html"
     assert "Update now" in client.get("/admin.html").text
 

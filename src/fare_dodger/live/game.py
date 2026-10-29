@@ -659,15 +659,20 @@ class LiveGame:
         self._walk_free(who, step, direction)
 
     def _walk_free(self, who: Traveller, step: float, direction: Point) -> None:
-        """Walk anywhere in the play area except into a building, sliding along walls.
+        """Walk anywhere in the play area except into a building or the water (bridges are
+        fine), sliding along walls.
 
         Starting inside a footprint (rare: a stop drawn inside a building) lets you walk out.
         """
-        world, buildings = self.world, self.world.buildings
+        world, buildings, water = self.world, self.world.buildings, self.world.water
         inside = buildings.at(who.pos) if buildings is not None else None
+        # In the water already (e.g. got off a ferry or a bridge edge): walk out freely.
+        wet = water is not None and water.blocks(who.pos)
 
         def free(p: Point) -> bool:
             if not world.contains(p):
+                return False
+            if water is not None and not wet and water.blocks(p):
                 return False
             if buildings is None:
                 return True

@@ -13,6 +13,7 @@
   --tram: #fcc419;
   --trolleybus: #fd7e14;
   --bus: #339af0;
+  --suburban_rail: #2f9e44;
   --shadow: 4px 4px 0 var(--ink);
 }
 
@@ -96,6 +97,7 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 .pill.tram { background: var(--tram); color: var(--ink); }
 .pill.trolleybus { background: var(--trolleybus); }
 .pill.bus { background: var(--bus); }
+.pill.suburban_rail { background: var(--suburban_rail); }
 
 /* Map markers */
 .vehicle { display: flex; justify-content: center; align-items: center; }

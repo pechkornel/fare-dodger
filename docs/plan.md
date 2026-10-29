@@ -222,6 +222,9 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
   arrows that stay right when zoomed in (`feat/packages`, ADR 0013).
 - ✅ Admin page with status, games and Update now, through a host-side updater
   (`feat/admin`, ADR 0014).
+- ✅ The whole city: 21 districts (with the HÉV), loaded on demand with the next one
+  preloaded, map data downloaded per district in the background, and the Danube as a wall
+  crossed on bridges (`feat/whole-city`, ADR 0015).
 - Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and keep
   polishing the graphics. Multiplayer is further away.
 

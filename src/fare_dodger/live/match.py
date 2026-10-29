@@ -19,14 +19,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fare_dodger.config import LiveConfig
+from fare_dodger.live.districts import District, DistrictPool
 from fare_dodger.live.game import YOU, LiveGame, Role, Seat, Status
-from fare_dodger.live.world import World
 
-
-@dataclass(frozen=True, slots=True)
-class District:
-    name: str
-    world: World
+__all__ = ["District", "Match", "RoundResult", "Team", "match_winner", "role_for"]
 
 
 @dataclass
@@ -73,19 +69,27 @@ def match_winner(a: int, b: int, rounds: int, regulation: int, size: int = 1) ->
 class Match:
     def __init__(
         self,
-        districts: list[District],
+        districts: list[District] | DistrictPool,
         cfg: LiveConfig,
         seed: int,
         teams: list[Team] | None = None,
         size: int = 1,
         start: Role | None = None,
+        *,
+        begin: bool = True,
     ) -> None:
         """Without ``teams``, a single-player match: you against the bots, starting as
-        ``cfg.start_role``. ``start`` is team A's side in the first round."""
+        ``cfg.start_role``. ``start`` is team A's side in the first round.
+
+        With ``begin=False`` the first round is not set up yet: load
+        :meth:`upcoming_district` first (e.g. in the background), then call :meth:`begin`.
+        """
         if not districts:
             msg = "a match needs at least one district"
             raise ValueError(msg)
-        self.districts = districts
+        self.districts = (
+            districts if isinstance(districts, DistrictPool) else DistrictPool.of(districts)
+        )
         self.cfg = cfg
         self.rng = random.Random(seed)
         self.teams = teams or [Team("You", [(YOU, "You")]), Team("Bots")]
@@ -93,7 +97,18 @@ class Match:
         self.start = start if start is not None else Role(cfg.start_role)
         self.order: list[int] = []
         self.results: list[RoundResult] = []
+        self._game_number = 0
+        self.district = self._district_for(1)
+        if begin:
+            self.begin()
+
+    def begin(self) -> None:
+        """Set up the first round."""
         self.game = self._new_game()
+
+    def upcoming_district(self) -> int:
+        """The district of the next round to set up (the first one before :meth:`begin`)."""
+        return self._district_for(self._game_number + 1)
 
     @property
     def round_number(self) -> int:
@@ -124,7 +139,7 @@ class Match:
 
     def _district_for(self, number: int) -> int:
         while len(self.order) < number:
-            cycle = list(range(len(self.districts)))
+            cycle = self.districts.playable()
             self.rng.shuffle(cycle)
             if self.order and len(cycle) > 1 and cycle[0] == self.order[-1]:
                 cycle.append(cycle.pop(0))  # no district twice in a row
@@ -144,7 +159,7 @@ class Match:
         runners_team = 0 if self.role is Role.DODGER else 1
         runners = self._seats(self.teams[runners_team], "Dodger")
         hunters = self._seats(self.teams[1 - runners_team], "Hunter")
-        world = self.districts[self.district].world
+        world = self.districts.get(self.district)
         return LiveGame(
             world, self.cfg, self.rng.randrange(2**31), runners=runners, hunters=hunters
         )
@@ -190,7 +205,7 @@ class Match:
             "names": {"you": self.teams[mine].name, "them": self.teams[other].name},
             "role": my_role.value,
             "district": self.district,
-            "district_name": self.districts[self.district].name,
+            "district_name": self.districts.name(self.district),
             "round_over": self.round_recorded,
             "next_role": next_role,
             "winner": None if winner is None else ("you" if winner == mine else "them"),

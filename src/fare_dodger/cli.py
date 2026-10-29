@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import random
 import statistics
 import sys
+import threading
 import time
 import tomllib
 import webbrowser
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 import typer
@@ -19,15 +21,21 @@ import uvicorn
 
 from fare_dodger import __version__
 from fare_dodger.bots import DODGER_BOTS, INSPECTOR_BOTS
-from fare_dodger.config import NetworkConfig, RulesConfig
+from fare_dodger.config import LiveConfig, NetworkConfig, RulesConfig
 from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
 from fare_dodger.live.admin import Admin
-from fare_dodger.live.buildings import Buildings, download_buildings, read_buildings
-from fare_dodger.live.cafes import download_cafes, pick_cafes, read_cafes
-from fare_dodger.live.match import District
+from fare_dodger.live.buildings import (
+    BUILDINGS_VERSION,
+    Buildings,
+    download_buildings,
+    read_buildings,
+)
+from fare_dodger.live.cafes import CAFES_VERSION, download_cafes, pick_cafes, read_cafes
+from fare_dodger.live.districts import DistrictPool, DistrictSpec
 from fare_dodger.live.server import create_app
 from fare_dodger.live.streets import (
+    STREETS_VERSION,
     BBox,
     StreetGraph,
     area_bbox,
@@ -35,6 +43,7 @@ from fare_dodger.live.streets import (
     download_streets,
     read_streets,
 )
+from fare_dodger.live.water import WATER_VERSION, WaterMask, download_water, read_water
 from fare_dodger.live.world import World
 from fare_dodger.modes import VEHICLE_MODES
 from fare_dodger.network.timetable import Timetable
@@ -304,20 +313,138 @@ def _load_osm_extra[T](
     what: str,
     path: Path,
     bbox: BBox,
-    read: Callable[[Path, BBox], list[T] | None],
+    read: Callable[[Path, BBox], T | None],
     download: Callable[[Path, BBox], Path],
-) -> list[T]:
-    """An optional OpenStreetMap layer, downloaded once; empty (with a warning) if that fails."""
+) -> T | None:
+    """An optional OpenStreetMap layer, downloaded once; ``None`` (with a warning) if that
+    fails."""
     found = read(path, bbox)
     if found is None:
-        typer.echo(f"downloading {what} from OpenStreetMap (Overpass)...", err=True)
+        typer.echo(f"  downloading {what} from OpenStreetMap (Overpass)...", err=True)
         try:
             download(path, bbox)
         except httpx.HTTPError as exc:
             typer.echo(f"  no {what} this time ({exc}); playing without them", err=True)
-            return []
-        found = read(path, bbox) or []
+            return None
+        found = read(path, bbox)
     return found
+
+
+#: The background download goes over the missing districts this often, a while apart.
+WARM_PASSES = 5
+WARM_RETRY_S = 300.0
+
+
+class DistrictLoader:
+    """Builds one district's world: its network, and its own OpenStreetMap layers (streets
+    for the bots, buildings and water as walls, cafés), cached in ``data/osm/<district>/``."""
+
+    def __init__(
+        self, workspace: Workspace, specs: list[DistrictSpec], cfg: LiveConfig, *, osm: bool
+    ) -> None:
+        self.workspace, self.specs, self.cfg, self.osm = workspace, specs, cfg, osm
+        self._locks = [threading.Lock() for _ in specs]
+        self.versions = {
+            "cafes": CAFES_VERSION,
+            **(
+                {"streets": STREETS_VERSION, "buildings": BUILDINGS_VERSION, "water": WATER_VERSION}
+                if osm
+                else {}
+            ),
+        }
+
+    def _marker(self, i: int) -> Path:
+        return self.workspace.osm_dir(self.specs[i].slug) / "layers.json"
+
+    def cached(self, i: int) -> bool:
+        """Whether district ``i``'s layers are all on disk (it loads without downloading)."""
+        try:
+            found = json.loads(self._marker(i).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return all(found.get(k) == v for k, v in self.versions.items())
+
+    def layers(self, i: int) -> dict[str, Any]:
+        """District ``i``'s OpenStreetMap layers, downloading the missing ones."""
+        spec = self.specs[i]
+        bbox = covering_bbox([area_bbox(spec.net.area)])
+        folder = self.workspace.osm_dir(spec.slug)
+        get = _load_osm_extra
+        with self._locks[i]:  # the warmer and a starting round never download twice
+            out: dict[str, Any] = {
+                "cafes": get("cafés", folder / "cafes.json", bbox, read_cafes, download_cafes)
+            }
+            if self.osm:
+                out["streets"] = get(
+                    "streets", folder / "streets.json", bbox, read_streets, download_streets
+                )
+                out["buildings"] = get(
+                    "buildings",
+                    folder / "buildings.json",
+                    bbox,
+                    read_buildings,
+                    download_buildings,
+                )
+                out["water"] = get("water", folder / "water.json", bbox, read_water, download_water)
+            if all(out.get(k) is not None for k in self.versions):
+                self._marker(i).write_text(json.dumps(self.versions), encoding="utf-8")
+        return out
+
+    def __call__(self, i: int) -> World:
+        spec, cfg = self.specs[i], self.cfg
+        started = time.perf_counter()
+        layers = self.layers(i)
+        tt, _, _ = self.workspace.network(spec.net)
+        world = World(tt, spec.net.area, self.workspace.vehicle_paths(spec.net, tt))
+        if layers.get("streets"):
+            nodes, ways = layers["streets"]
+            world.set_streets(
+                StreetGraph.from_osm(nodes, ways, world.proj.to_xy, spec.net.area.contains)
+            )
+        world.cafes = pick_cafes(layers["cafes"] or [], world, cfg.cafes_per_district)
+        if layers.get("buildings"):
+            # Stops, stations and cafés stay reachable even when drawn inside a footprint.
+            reachable_points = [
+                *world.node_xy,
+                *world.stop_xy,
+                *(p for points in world.platform_xy for p in points),
+                *(c.pos for c in world.cafes),
+            ]
+            world.buildings = Buildings.from_latlon(
+                layers["buildings"], world.proj.to_xy, spec.net.area.contains, reachable_points
+            )
+        if layers.get("water"):
+            s, w, n, e = covering_bbox([area_bbox(spec.net.area)])
+            (x0, y0), (x1, y1) = world.proj.to_xy(s, w), world.proj.to_xy(n, e)
+            world.water = WaterMask.from_latlon(layers["water"], world.proj.to_xy, (x0, y0, x1, y1))
+        info = f", {len(world.streets)} street nodes" if world.streets else ""
+        info += f", {len(world.cafes)} cafés"
+        if world.buildings is not None:
+            info += f", {len(world.buildings)} buildings"
+        if world.water is not None:
+            info += f", {int(world.water.water.sum()) * 16 // 10_000} ha of water"
+        typer.echo(
+            f"  {spec.name}: {tt.n_nodes} stations, {tt.n_patterns} patterns{info} "
+            f"({time.perf_counter() - started:.1f}s)",
+            err=True,
+        )
+        return world
+
+    def warm(self) -> None:
+        """Download every district's layers, one after the other (a background thread), so
+        later rounds do not wait for Overpass."""
+        for attempt in range(WARM_PASSES):
+            missing = [i for i in range(len(self.specs)) if not self.cached(i)]
+            if not missing:
+                return
+            if attempt:
+                time.sleep(WARM_RETRY_S)  # Overpass was busy: try the failures again later
+            for i in missing:
+                try:
+                    self.layers(i)
+                except Exception as exc:  # the warmer must never stop the server
+                    name = self.specs[i].name
+                    typer.echo(f"  {name}: OpenStreetMap download failed ({exc})", err=True)
 
 
 @app.command()
@@ -337,10 +464,13 @@ def play(
         bool,
         typer.Option(
             "--osm/--no-osm",
-            help="Use OpenStreetMap streets (bot routes), buildings (walls), cafés "
-            "(downloaded once)",
+            help="Use OpenStreetMap streets (bot routes), buildings and water (walls), "
+            "cafés (downloaded once per district)",
         ),
     ] = True,
+    keep: Annotated[
+        int, typer.Option(help="Districts kept in memory at once (others load when needed)")
+    ] = 6,
 ) -> None:
     """Play the live game in the browser: a match of rounds on Budapest districts, as the
     Dodger and as a Bounty Hunter. Walk with WASD, ride real trams and buses."""
@@ -348,70 +478,26 @@ def play(
     if seed is not None:
         cfg = cfg.model_copy(update={"seed": seed})
     workspace = Workspace.at(data)
-    nets = live_districts(config)
-    street_data = None
-    if osm:
-        bbox = covering_bbox([area_bbox(net.area) for _, net in nets])
-        street_data = read_streets(workspace.streets_file, bbox)
-        if street_data is None:
-            typer.echo("downloading streets from OpenStreetMap (Overpass, ~1 min)...", err=True)
-            download_streets(workspace.streets_file, bbox)
-            street_data = read_streets(workspace.streets_file, bbox)
-    everywhere = covering_bbox([area_bbox(net.area) for _, net in nets])
-    cafes = _load_osm_extra("cafés", workspace.cafes_file, everywhere, read_cafes, download_cafes)
-    buildings = (
-        _load_osm_extra(
-            "buildings", workspace.buildings_file, everywhere, read_buildings, download_buildings
-        )
-        if osm
-        else []
-    )
-    districts = []
-    for name, net in nets:
-        started = time.perf_counter()
-        tt, _, _ = workspace.network(net)
-        world = World(tt, net.area, workspace.vehicle_paths(net, tt))
-        if street_data is not None:
-            world.set_streets(
-                StreetGraph.from_osm(*street_data, world.proj.to_xy, net.area.contains)
-            )
-        world.cafes = pick_cafes(cafes, world, cfg.cafes_per_district)
-        if buildings:
-            # Stops, stations and cafés stay reachable even when drawn inside a footprint.
-            reachable_points = [
-                *world.node_xy,
-                *world.stop_xy,
-                *(p for points in world.platform_xy for p in points),
-                *(c.pos for c in world.cafes),
-            ]
-            world.buildings = Buildings.from_latlon(
-                buildings, world.proj.to_xy, net.area.contains, reachable_points
-            )
-        districts.append(District(name, world))
-        street_info = f", {len(world.streets)} street nodes" if world.streets else ""
-        street_info += f", {len(world.cafes)} cafés"
-        if world.buildings is not None:
-            street_info += f", {len(world.buildings)} buildings"
-        typer.echo(
-            f"  {name}: {tt.n_nodes} stations, {tt.n_patterns} patterns{street_info} "
-            f"({time.perf_counter() - started:.1f}s)",
-            err=True,
-        )
-    tt0 = districts[0].world.tt
+    specs = [DistrictSpec(name, net) for name, net in live_districts(config)]
+    loader = DistrictLoader(workspace, specs, cfg, osm=osm)
+    pool = DistrictPool([d.name for d in specs], loader, keep=keep, playable=loader.cached)
+    # One district now (a downloaded one if there is any): this also builds or checks the feed.
+    tt0 = pool.get(pool.playable()[0]).tt
+    threading.Thread(target=loader.warm, name="osm-warmer", daemon=True).start()
     admin = Admin.from_env(
         workspace.root,
         {
             "version": __version__,
             "feed": tt0.feed_version,
             "service_date": tt0.service_date,
-            "districts": str(len(districts)),
+            "districts": str(len(pool)),
         },
     )
     if admin is not None:
         typer.echo("  admin page: /admin (FARE_DODGER_ADMIN_TOKEN is set)", err=True)
-    app_ = create_app(districts, cfg, admin=admin)
+    app_ = create_app(pool, cfg, admin=admin)
     url = f"http://{host}:{port}/"
-    typer.echo(f"Fare Dodger live: {len(districts)} districts. Open {url} (Ctrl+C to stop)")
+    typer.echo(f"Fare Dodger live: {len(pool)} districts. Open {url} (Ctrl+C to stop)")
     if open_browser:
         webbrowser.open(url)
     uvicorn.run(app_, host=host, port=port, log_level="warning")
