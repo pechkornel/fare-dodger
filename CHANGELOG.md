@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Live game: the map stays over Budapest and its surroundings. The camera can't pan out of
+  it, so no map tiles load for the rest of the world.
 - Live game: vehicles drive in for a moment before their first stop, growing in (fading in
   on the flat map), and drive off after their last stop, shrinking away. They no longer pop
   up at a stop and vanish. You can only board them during the timetabled run.
