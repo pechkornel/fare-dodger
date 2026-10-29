@@ -23,7 +23,7 @@ def world(timetable: Timetable, fixture_network_config: NetworkConfig) -> World:
 
 
 def two_v_two(world: World) -> LiveGame:
-    """Ann and a bot run; Bob, a bot and the two extra bots hunt."""
+    """Ann and a bot run; Bob, a bot and the extra bots hunt."""
     return LiveGame(
         world,
         LiveConfig(inspected_share=0.0),
@@ -37,7 +37,7 @@ def test_teams_and_the_two_extra_hunters(world: World) -> None:
     game = two_v_two(world)
     assert len(game.runners) == 2
     assert game.runners[0].player == "ann" and game.runners[1].bot is not None
-    assert len(game.hunters.agents) == 1 + 2  # the bot seat plus the two extra bots
+    assert len(game.hunters.agents) == 1 + game.cfg.hunter_extra  # the bot seat plus extras
     assert {pid: h.role for pid, h in game.humans.items()} == {
         "ann": Role.DODGER,
         "bob": Role.HUNTER,
@@ -88,7 +88,7 @@ def test_views_are_per_player(world: World) -> None:
     ann = game.snapshot("ann")
     assert [d["name"] for d in ann["dodgers"]] == ["Dodger bot"]  # the teammate
     # Bob sees only the Dodgers in sight (none at the start) and his three bot teammates.
-    assert bob["dodgers"] == [] and len(bob["hunters"]) == 3
+    assert bob["dodgers"] == [] and len(bob["hunters"]) == 1 + game.cfg.hunter_extra
     assert bob["wallet"] is None and ann["wallet"] is not None
 
 
@@ -105,10 +105,11 @@ def test_a_bounty_hunter_who_leaves_becomes_a_bot_not_a_statue(world: World) -> 
     bob.pos = (x + 150.0, y)  # off the network, in a street
     game.make_bot("bob")
     assert "bob" not in game.humans
-    assert len(game.hunters.agents) == 3 + 1  # one more bot where Bob stood
+    bots = 1 + game.cfg.hunter_extra
+    assert len(game.hunters.agents) == bots + 1  # one more bot where Bob stood
     new = game.hunters.agents[-1]
     assert new.pos == bob.pos
-    assert len(game.hunter_states()) == 4  # and no frozen human left behind
+    assert len(game.hunter_states()) == bots + 1  # and no frozen human left behind
     game.step(20)
     assert distance(new.pos, (x, y)) < 150.0 - 20  # walking back to the network
 
@@ -120,7 +121,10 @@ def test_a_player_who_left_is_a_bot_in_the_next_rounds(world: World) -> None:
     match.game.status = Status.ESCAPED
     assert match.next_round()
     assert set(match.game.humans) == {"ann"}  # Bob's seat went to a bot
-    assert len(match.game.runners) + len(match.game.hunters.agents) == 1 + 1 + 2
+    assert (
+        len(match.game.runners) + len(match.game.hunters.agents)
+        == 1 + 1 + LiveConfig().hunter_extra
+    )
 
 
 def test_waiting_for_the_departure_on_screen(world: World) -> None:

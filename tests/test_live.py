@@ -587,8 +587,8 @@ def test_asking_to_get_off_can_be_cancelled(world: World) -> None:
     assert game.dodger.pos == world.node_xy[node(world, "East")]
 
 
-def test_bounty_hunters_outnumber_the_dodger_by_two() -> None:
-    assert LiveConfig().n_hunters == 3
+def test_bounty_hunters_outnumber_the_dodgers() -> None:
+    assert LiveConfig().n_hunters == 1 + 3
     assert LiveConfig(hunter_extra=4).n_hunters == 5
 
 

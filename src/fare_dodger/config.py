@@ -224,9 +224,9 @@ class LiveConfig(_Frozen):
     #: Timetable seconds that pass per real second.
     time_scale: float = Field(default=9.0, gt=0)
     #: The Bounty Hunters learn the Dodger's position this often (timetable seconds).
-    ping_every_s: int = Field(default=270, gt=0)
+    ping_every_s: int = Field(default=180, gt=0)
     #: The Bounty Hunters always outnumber the Dodgers by this many (bots fill the places).
-    hunter_extra: int = Field(default=2, ge=0)
+    hunter_extra: int = Field(default=3, ge=0)
     #: Real seconds of countdown before each round, while nobody can move.
     freeze_s: float = Field(default=3.0, ge=0)
     #: A brisk jog: faster than real walking so rounds stay short, still well below the
@@ -235,7 +235,7 @@ class LiveConfig(_Frozen):
     #: A Bounty Hunter on foot this close to an exposed Dodger catches them.
     catch_radius_m: float = Field(default=25.0, gt=0)
     #: A Bounty Hunter on foot spots a Dodger on foot within this distance and gives chase.
-    sight_radius_m: float = Field(default=100.0, ge=0)
+    sight_radius_m: float = Field(default=200.0, ge=0)
     #: The two sides see each other on the map only this close (and only zoomed in): the
     #: Dodgers otherwise just know how far the nearest Bounty Hunter is.
     see_radius_m: float = Field(default=200.0, gt=0)
