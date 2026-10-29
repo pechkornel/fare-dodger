@@ -121,3 +121,14 @@ def test_download_and_read_cafes(tmp_path: Path) -> None:
     assert read_cafes(path, (47.0, 19.0, 47.6, 19.1)) is None  # not covered
     assert read_cafes(tmp_path / "missing.json") is None
     assert "cafe" in overpass_query(bbox)
+
+
+def test_a_coffee_tells_the_bounty_hunters_which_cafe(world: World) -> None:
+    # Camping in cafés was too strong: buying a coffee reports the exact café.
+    game = coffee_game(world)
+    d = game.dodger
+    game.buy_coffee()
+    ping = game.pings[-1]
+    assert ping.pos == d.pos and ping.until == d.brewing_until
+    assert game.hunters.last_ping == ping  # the bots head there
+    assert any("barista reported you at Kávé" in e.text for e in game.drain_events())

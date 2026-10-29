@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Live game: buying a coffee reports you to the Bounty Hunters with the usual alert,
+  at that exact café. Camping in cafés was too strong.
 - Live game: matches are a quick best of 3 or a long best of 6, picked in the menu (for
   solo games and new rooms). Best of 10 was too long. With 3 rounds, halftime comes after round 1.
 - Live game: districts are 1.5 times wider (2.25 times the area). Their map data downloads
