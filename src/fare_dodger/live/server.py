@@ -170,6 +170,14 @@ def create_app(
             views[index] = {**world_view(world, cfg), "name": pool.name(index)}
         return views[index]
 
+    @app.get("/api/backdrop")
+    def backdrop() -> dict[str, int]:
+        """The district behind the menu: one in memory, else a downloaded one (never one that
+        would have to be downloaded first)."""
+        playable = pool.playable()
+        loaded = [i for i in pool.loaded() if i in playable]
+        return {"district": loaded[-1] if loaded else playable[0]}
+
     @app.get("/healthz")
     def health() -> dict[str, Any]:
         return {

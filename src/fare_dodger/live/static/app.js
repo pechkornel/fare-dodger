@@ -54,7 +54,7 @@ let pendingEvents = [];  // messages from every snapshot since the last frame
 function init() {
   setupMinimap();
   showMenu();
-  loadDistrict(0);
+  loadBackdrop();
   requestAnimationFrame(frame);
 }
 
@@ -118,7 +118,7 @@ function quitToMenu() {
   $("lobby").hidden = true;
   showMenu();
   district = -1;
-  loadDistrict(0);
+  loadBackdrop();
 }
 
 function createMap(w) {
@@ -194,6 +194,13 @@ function frame() {
   }
   if (Object.keys(view).length) map.jumpTo(view);
   $("map").classList.toggle("toy", zoom >= SWITCH_ZOOM);
+}
+
+// Behind the menu: a district the server has ready, not necessarily the first one.
+async function loadBackdrop() {
+  let index = 0;
+  try { index = (await (await fetch("api/backdrop")).json()).district; } catch { /* first one */ }
+  return loadDistrict(index);
 }
 
 async function loadDistrict(index) {

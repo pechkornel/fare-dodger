@@ -209,6 +209,7 @@ def test_the_server_loads_a_district_when_a_match_needs_it(world: World) -> None
     pool, loads = counting_pool(world, n=3, keep=3)
     with TestClient(create_app(pool, LiveConfig(seed=5), Limits())) as client:
         assert loads == []  # nothing is built up front
+        assert client.get("/api/backdrop").json() == {"district": 0}
         assert client.get("/api/world/2").json()["name"] == "D2"
         assert loads == [2]
         with client.websocket_connect("/ws") as ws:
