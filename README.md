@@ -77,16 +77,19 @@ teams, CS-style.
     the map, with an arrow when it is off screen, and delivering pays 1,200 Ft. Get caught and
     the package is lost.
   - Real cafés (☕ on the map) sell coffee with **C**: 500 Ft and 3 seconds standing still,
-    then 20 seconds running almost as fast as a bus.
+    then 20 seconds running almost as fast as a bus. The barista reports you to the Bounty
+    Hunters, at that café.
   - Ticket inspectors ride about 35% of the trips, and you only find out once you are aboard.
   - Without a ticket, you are put off at the next stop and held while the fine is written,
     and the Bounty Hunters are told where you are. If you can't pay it all, they take what
     you have and you go to jail: the district's 🚔 police station, for 30 seconds. The
     Bounty Hunters are told, so it's a race: run when the door opens.
-  - Three Bounty Hunters learn your position every 3 timetable minutes, chase you on sight,
+  - You see the Bounty Hunters only within 200 m and zoomed in. Otherwise the top bar shows
+    how far the nearest one is: red when close, green when far.
+  - Three Bounty Hunters learn your position every 270 timetable seconds, chase you on sight,
     and catch you when you are both on foot (waiting at a stop counts), or when they ride
     the same vehicle. Staying aboard is safe.
-- **As a Bounty Hunter:** hunt the Dodgers with your team. You see them only up close or
+- **As a Bounty Hunter:** hunt the Dodgers with your team. You see them only up close (200 m, zoomed in) or
   through the reports on the minimap, and an arrow at the screen edge points to the latest one.
 - **Map:** zoom with the mouse wheel or **+/−**. Zoomed out, the map is flat. Zoomed in, it
   tilts into a 3D toy town of rounded-cube houses, trams, buses and people.

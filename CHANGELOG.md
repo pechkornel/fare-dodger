@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Live game: the two sides see each other only up close (200 m) and zoomed in. The Dodger's
+  top bar shows how far the nearest Bounty Hunter is, red when close and green when far
+  (ADR 0017).
 - Live game: the map stays over Budapest and its surroundings. The camera can't pan out of
   it, so no map tiles load for the rest of the world.
 - Live game: vehicles drive in for a moment before their first stop, growing in (fading in

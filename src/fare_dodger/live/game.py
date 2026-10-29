@@ -15,8 +15,9 @@ they have and is held longer: bad luck with the inspectors never ends a round on
 The Bounty Hunters win when one of them rides the same trip as the Dodger, or when both are
 on foot (waiting at a stop and being held count as on foot) within ``catch_radius_m``. They
 learn the Dodger's position every ``ping_every_s`` and see a Dodger who is not riding within
-``sight_radius_m``. The Dodger always sees the Bounty Hunters
-and wins by lasting ``duration_minutes``.
+``see_radius_m`` (bots give chase within ``sight_radius_m``). A Dodger sees Bounty Hunters on
+the map only within ``see_radius_m`` too, and otherwise only how far the nearest one is. The
+Dodgers win by lasting ``duration_minutes``.
 """
 
 from __future__ import annotations
@@ -895,9 +896,7 @@ class LiveGame:
         d = runner.traveller
         if runner.caught or d.ride is not None:
             return False
-        return any(
-            distance(s.pos, d.pos) <= self.cfg.sight_radius_m for s, _ in self.hunter_states()
-        )
+        return any(distance(s.pos, d.pos) <= self.cfg.see_radius_m for s, _ in self.hunter_states())
 
     def dodger_visible(self) -> bool:
         return any(self.visible(r) for r in self.runners)
@@ -1061,9 +1060,18 @@ class LiveGame:
         over = self.status is not Status.RUNNING
         hunter_states = self.hunter_states()
         # Bounty Hunters: the bots, plus the human ones (as teammates or seen by the Dodgers).
+        # A Dodger in play sees only the ones close by; the rest is a distance on the top bar.
+        near: Point | None = (
+            p.pos if as_runner and me is not None and not me.caught and not over else None
+        )
+
+        def seen(pos: Point) -> bool:
+            return near is None or distance(near, pos) <= self.cfg.see_radius_m
+
         hunters_view = [
             {"pos": self._latlon(s.pos), "riding": s.trip is not None, "chasing": ag.chasing}
             for s, ag in zip(self.hunters.states(), self.hunters.agents, strict=True)
+            if seen(s.pos)
         ] + [
             {
                 "pos": self._latlon(h.traveller.pos),
@@ -1072,7 +1080,7 @@ class LiveGame:
                 "name": h.name,
             }
             for other, h in self.humans.items()
-            if h.role is Role.HUNTER and other != pid
+            if h.role is Role.HUNTER and other != pid and seen(h.traveller.pos)
         ]
         if as_runner:
             dodgers_view = [
@@ -1243,6 +1251,7 @@ def world_view(world: World, cfg: LiveConfig) -> dict[str, Any]:
         "time_scale": cfg.time_scale,
         "ping_every_s": cfg.ping_every_s,
         "sight_radius_m": cfg.sight_radius_m,
+        "see_radius_m": cfg.see_radius_m,
         "catch_radius_m": cfg.catch_radius_m,
         "board_radius_m": cfg.board_radius_m,
         "ticket_price_ft": cfg.ticket_price_ft,
