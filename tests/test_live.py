@@ -470,17 +470,32 @@ def test_dodger_is_hidden_from_hunters_when_far(world: World) -> None:
 
 def test_bot_dodger_travels_and_rounds_finish(world: World) -> None:
     outcomes = set()
+    moved = 0
     for seed in range(6):
         game = LiveGame(world, LiveConfig(), seed=seed, role=Role.HUNTER)
         start = game.dodger.pos
-        moved = False
         while game.status is Status.RUNNING:
             game.step(1.0)
-            moved = moved or game.dodger.pos != start
-        assert moved
+        moved += game.dodger.pos != start  # some are caught waiting for their first vehicle
         outcomes.add(game.status)
         assert game.player_won is (game.status is Status.CAUGHT)
+    assert moved >= 3
     assert Status.CAUGHT in outcomes
+
+
+def test_bot_hunters_never_outrun_their_legs(world: World) -> None:
+    # The bug: a journey ending at its arrival second left the bot at its origin station, so
+    # the next one started there: a jump across the district, or a sprint through houses.
+    cfg = LiveConfig()
+    for seed in range(6):
+        game = LiveGame(world, cfg, seed=seed, role=Role.HUNTER)
+        while game.status is Status.RUNNING:
+            before = [(a.pos, a.trip) for a in game.hunters.agents]
+            game.step(1.0)
+            dt = cfg.time_scale
+            for (pos, trip), agent in zip(before, game.hunters.agents, strict=True):
+                if trip is None and agent.trip is None:
+                    assert distance(pos, agent.pos) <= cfg.walk_speed_mps * dt + 1e-6
 
 
 def test_live_toml_districts() -> None:

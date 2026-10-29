@@ -89,6 +89,18 @@ def journey_state(world: World, journey: Journey, t: float) -> AgentState:
     return AgentState(ends[-1][1] if ends else world.node_xy[dest], None, dest)
 
 
+def journey_goal(world: World, journey: Journey, t: float) -> Point:
+    """Where someone on foot following ``journey`` heads at time ``t``: the end of the walk
+    under way, or where the next vehicle stops."""
+    ends = leg_ends(world, journey)
+    for leg, (start, end) in zip(journey.legs, ends, strict=True):
+        if t < leg.dep:
+            return start
+        if t <= leg.arr:
+            return start if isinstance(leg, RideLeg) else end
+    return ends[-1][1] if ends else world.node_xy[journey.destination]
+
+
 @dataclass
 class Agent:
     node: int
@@ -234,7 +246,7 @@ class BountyHunters:
                     agent.node, agent.returning_to = agent.returning_to, None
                     agent.needs_replan = True
                 continue
-            self._follow(agent, t)
+            self._follow(agent, t, step)
 
     def _held_spot(self, agent: Agent, t: float) -> Point | None:
         """Where a Dodger is held (a fine, the jail), if this Bounty Hunter has reached the
@@ -247,13 +259,28 @@ class BountyHunters:
                 return ping.pos
         return None
 
-    def _follow(self, agent: Agent, t: float) -> None:
+    def _follow(self, agent: Agent, t: float, step: float) -> None:
         if agent.plan is not None:
             state = journey_state(self.world, agent.plan, t)
-            agent.pos, agent.trip = state.pos, state.trip
-            if state.node is not None:
+            if state.trip is None:
+                # On foot the bot walks (never jumps) to where its journey goes next: the end
+                # of this walk, or where the next vehicle stops. Late is fine, until it is
+                # too late to board.
+                goal = journey_goal(self.world, agent.plan, t)
+                agent.pos = self.world.walk_towards(agent.follower, agent.pos, goal, step)
+                agent.trip = None
+            elif agent.trip is None and not self._can_board(agent, state.trip, t):
+                missed = self.world.nearest_node(agent.pos)
+                agent.node = missed if missed is not None else agent.node
+                agent.plan, agent.needs_replan = None, True
+            else:
+                agent.pos, agent.trip = state.pos, state.trip
+            if agent.plan is not None and state.node is not None:
                 agent.node = state.node
-            if t >= agent.plan.arrival:
+            if agent.plan is not None and t >= agent.plan.arrival:
+                # The last leg can still be running at its arrival second (state.node is None):
+                # the next journey starts from where this one ended, never from its origin.
+                agent.node, agent.trip = agent.plan.destination, None
                 agent.plan = None
             elif not (agent.needs_replan and state.node is not None):
                 return
@@ -261,11 +288,21 @@ class BountyHunters:
             if t < agent.idle_until:
                 return
             agent.target = self._search_target(t)
-        agent.plan = self._plan(agent.node, agent.target, t)
+        # Plan from when it can be at its station: it may still be walking there.
+        late = distance(agent.pos, self.world.node_xy[agent.node]) / self.cfg.walk_speed_mps
+        agent.plan = self._plan(agent.node, agent.target, t + late)
         agent.needs_replan = False
         if agent.plan is None:
-            agent.pos, agent.trip = self.world.node_xy[agent.node], None
+            agent.trip = None
             agent.idle_until = t + IDLE_WAIT_S
+
+    def _can_board(self, agent: Agent, trip: int, t: float) -> bool:
+        """Whether ``agent``, on foot, made it to where ``trip`` stops in time."""
+        assert agent.plan is not None
+        for leg, (start, _) in zip(agent.plan.legs, leg_ends(self.world, agent.plan), strict=True):
+            if isinstance(leg, RideLeg) and leg.trip == trip:
+                return distance(agent.pos, start) <= self.cfg.board_radius_m
+        return True
 
     def _search_target(self, t: float) -> int:
         """A station the Dodger could be at now, given the last ping (any before one)."""
