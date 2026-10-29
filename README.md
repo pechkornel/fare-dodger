@@ -72,9 +72,10 @@ teams, CS-style.
 - **As the Dodger:** survive. You start with 1,000 Ft. Buy a ticket at a stop with **T**
   (450 Ft), or *bliccel* and ride without one.
   - Earn money with packages: 📦 boxes wait around the district (only the Dodgers see them).
-    Walk to one and press **E** to take it; a 🏁 flag (with an arrow when it is off screen)
-    shows where to deliver it, 600–1,600 m away, for 1,200 Ft. Get caught and the package is
-    lost.
+    Each one goes to a landmark (a statue, monument, museum, church or theatre) one or two
+    rides away, shown when you stand at it. Press **E** to take it. The landmark is marked on
+    the map, with an arrow when it is off screen, and delivering pays 1,200 Ft. Get caught and
+    the package is lost.
   - Real cafés (☕ on the map) sell coffee with **C**: 500 Ft and 3 seconds standing still,
     then 20 seconds running almost as fast as a bus.
   - Ticket inspectors ride about 35% of the trips, and you only find out once you are aboard.

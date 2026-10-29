@@ -29,6 +29,7 @@ from fare_dodger.network.timetable import Timetable
 if TYPE_CHECKING:
     from fare_dodger.live.buildings import Buildings
     from fare_dodger.live.cafes import Cafe
+    from fare_dodger.live.landmarks import Landmark
     from fare_dodger.live.water import WaterMask
 
 Point = tuple[float, float]
@@ -103,6 +104,8 @@ class World:
         self.stop_xy = list(self.node_xy)
         #: Coffee shops (see :mod:`fare_dodger.live.cafes`).
         self.cafes: list[Cafe] = []
+        #: Sights that packages are delivered to (see :mod:`fare_dodger.live.landmarks`).
+        self.landmarks: list[Landmark] = []
         #: Footprints that block walking (see :mod:`fare_dodger.live.buildings`).
         self.buildings: Buildings | None = None
         #: Water that blocks walking, bridges excepted (see :mod:`fare_dodger.live.water`).
