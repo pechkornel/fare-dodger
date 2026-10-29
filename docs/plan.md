@@ -220,6 +220,8 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
   (`feat/free-walking`, ADR 0012).
 - ✅ Packages to earn money (Dodgers start with 1,000 Ft), per-player round results, edge
   arrows that stay right when zoomed in (`feat/packages`, ADR 0013).
+- ✅ Admin page with status, games and Update now, through a host-side updater
+  (`feat/admin`, ADR 0014).
 - Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and keep
   polishing the graphics. Multiplayer is further away.
 

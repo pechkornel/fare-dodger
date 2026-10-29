@@ -22,6 +22,7 @@ from fare_dodger.bots import DODGER_BOTS, INSPECTOR_BOTS
 from fare_dodger.config import NetworkConfig, RulesConfig
 from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
+from fare_dodger.live.admin import Admin
 from fare_dodger.live.buildings import Buildings, download_buildings, read_buildings
 from fare_dodger.live.cafes import download_cafes, pick_cafes, read_cafes
 from fare_dodger.live.match import District
@@ -396,7 +397,19 @@ def play(
             f"({time.perf_counter() - started:.1f}s)",
             err=True,
         )
-    app_ = create_app(districts, cfg)
+    tt0 = districts[0].world.tt
+    admin = Admin.from_env(
+        workspace.root,
+        {
+            "version": __version__,
+            "feed": tt0.feed_version,
+            "service_date": tt0.service_date,
+            "districts": str(len(districts)),
+        },
+    )
+    if admin is not None:
+        typer.echo("  admin page: /admin (FARE_DODGER_ADMIN_TOKEN is set)", err=True)
+    app_ = create_app(districts, cfg, admin=admin)
     url = f"http://{host}:{port}/"
     typer.echo(f"Fare Dodger live: {len(districts)} districts. Open {url} (Ctrl+C to stop)")
     if open_browser:

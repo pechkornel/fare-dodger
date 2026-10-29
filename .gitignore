@@ -27,3 +27,6 @@ Thumbs.db
 
 # Deployment secrets
 .env
+
+# Local Claude Code settings and worktrees
+.claude/
