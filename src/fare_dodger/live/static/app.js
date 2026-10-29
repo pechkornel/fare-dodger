@@ -14,6 +14,9 @@ const INK = "#2b2118";
 const MIN_ZOOM = 12.5;
 const MAX_ZOOM = 19;
 const START_ZOOM = 17.2;
+// Budapest and a little around it ([west, south], [east, north]): the camera never leaves it,
+// so no map tiles are fetched for the rest of the world.
+const MAP_BOUNDS = [[18.86, 47.33], [19.36, 47.63]];
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -127,7 +130,7 @@ function createMap(w) {
     container: "map",
     style: toonStyle(w.tiles.url, w.tiles.glyphs),
     center: lngLat(w.center), zoom: cam.zoom, pitch: pitchForZoom(cam.zoom),
-    minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxPitch: MAX_PITCH,
+    minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxPitch: MAX_PITCH, maxBounds: MAP_BOUNDS,
     attributionControl: { compact: true },
     // Right-click drag (or Ctrl+drag) turns the map; the tilt still follows the zoom.
     dragRotate: true, pitchWithRotate: false, touchPitch: false, keyboard: false,

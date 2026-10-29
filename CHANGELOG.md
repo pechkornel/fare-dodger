@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Live game: the map stays over Budapest and its surroundings. The camera can't pan out of
+  it, so no map tiles load for the rest of the world.
 - Live game: the clock runs at 9x (was 6x), so walking and vehicles are 1.5 times faster on
   screen, and rounds are 35 timetable minutes (still about 4 real minutes). Pings, fines and
   coffee last as many real seconds as before. The timetable time is small, without seconds.
