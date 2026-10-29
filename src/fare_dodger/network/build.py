@@ -21,7 +21,7 @@ from fare_dodger.network.transfers import walking_transfers
 from fare_dodger.timeutil import parse_hms
 
 #: Bump whenever the build logic changes so cached networks are rebuilt.
-BUILD_VERSION = 7
+BUILD_VERSION = 8
 
 _RAIL_MODES = frozenset({Mode.METRO, Mode.SUBURBAN_RAIL})
 
@@ -43,30 +43,41 @@ def _select_routes(feed: RawFeed, cfg: NetworkConfig, in_area: set[str]) -> dict
             continue
         candidates[row["route_id"]] = _Route(row["route_id"], name, mode)
 
-    f_start, f_end = (parse_hms(t) for t in cfg.bus_frequency_window)
-    hours = (f_end - f_start) / 3600
     buses = [r for r, info in candidates.items() if info.mode is Mode.BUS]
     if buses and cfg.bus_min_departures_per_hour > 0:
-        counts = (
-            feed.stop_times.join(feed.trips.select("trip_id", "route_id"), on="trip_id")
-            .filter(
-                pl.col("route_id").is_in(buses)
-                & pl.col("stop_id").is_in(sorted(in_area))
-                & (pl.col("departure") >= f_start)
-                & (pl.col("departure") < f_end)
-            )
-            .group_by("route_id", "stop_id")
-            .len()
-            .group_by("route_id")
-            .agg(pl.col("len").max())
-        )
-        busiest = dict(counts.iter_rows())
+        busiest = _busiest_stop_per_hour(feed, buses, in_area, cfg.bus_frequency_window)
+        night = _busiest_stop_per_hour(feed, buses, in_area, cfg.night_bus_window)
         for route_id in buses:
             route = candidates[route_id]
-            per_hour = busiest.get(route_id, 0) / hours
-            if per_hour < cfg.bus_min_departures_per_hour and route.name not in cfg.include_routes:
+            frequent = busiest.get(route_id, 0.0) >= cfg.bus_min_departures_per_hour
+            night_bus = (
+                cfg.night_bus_min_departures_per_hour > 0
+                and night.get(route_id, 0.0) >= cfg.night_bus_min_departures_per_hour
+            )
+            if not (frequent or night_bus) and route.name not in cfg.include_routes:
                 del candidates[route_id]
     return candidates
+
+
+def _busiest_stop_per_hour(
+    feed: RawFeed, routes: list[str], in_area: set[str], window: tuple[str, str]
+) -> dict[str, float]:
+    """Departures per hour at each route's busiest in-area stop during ``window``."""
+    start, end = (parse_hms(t) for t in window)
+    counts = (
+        feed.stop_times.join(feed.trips.select("trip_id", "route_id"), on="trip_id")
+        .filter(
+            pl.col("route_id").is_in(routes)
+            & pl.col("stop_id").is_in(sorted(in_area))
+            & (pl.col("departure") >= start)
+            & (pl.col("departure") < end)
+        )
+        .group_by("route_id", "stop_id")
+        .len()
+        .group_by("route_id")
+        .agg(pl.col("len").max())
+    )
+    return {route: n / ((end - start) / 3600) for route, n in counts.iter_rows()}
 
 
 def build_timetable(feed: RawFeed, cfg: NetworkConfig) -> Timetable:

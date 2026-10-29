@@ -6,8 +6,10 @@
 # "auto": the Tue/Wed/Thu with the most trips inside the downloaded feed's validity, so the
 # server keeps working when BKK publishes a new feed. Set a date ("2026-11-17") to pin it.
 service_date = "auto"
-window_start = "07:30"
-window_end = "09:30"
+# The whole service day: rounds start at different times (start_times below), night buses
+# included. A trip listed at 01:00 is the night after the service day's evening.
+window_start = "00:00"
+window_end = "26:00"
 # RAPTOR's walking transfers use the live game's jogging speed, along streets (detour).
 walk_speed_kmh = 10.0
 walk_detour_factor = 1.3
@@ -30,6 +32,10 @@ vertices = [
 
 [live]
 start_time = "08:00"
+# Each round starts at one of these (plus up to start_jitter_minutes): rush hours, midday,
+# evening, and the night buses in the small hours.
+start_times = ["01:00", "02:30", "06:30", "08:00", "10:30", "13:00", "16:30", "18:00", "20:30", "22:30"]
+start_jitter_minutes = 25
 duration_minutes = 35
 time_scale = 9.0             # timetable seconds per real second (35 min = about 4 real minutes)
 ping_every_s = 270           # the Bounty Hunters learn the Dodger's position this often (30 s)
