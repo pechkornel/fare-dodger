@@ -1159,8 +1159,9 @@ class LiveGame:
                     world.mode(s.trip).value,
                     world.route(s.trip),
                     round(s.heading, 3),
+                    round(shown, 2),
                 ]
-                for s in world.active_trips(t)
+                for s, shown in world.shown_trips(t)
             ],
             "ping": (
                 {"pos": self._latlon(last_ping.pos), "age_s": round(t - last_ping.time)}

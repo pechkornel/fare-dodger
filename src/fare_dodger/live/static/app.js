@@ -477,7 +477,7 @@ function render(s) {
 
 function renderVehicles(list, myTrip) {
   const seen = new Set();
-  for (const [trip, lat, lon, mode, route] of list) {
+  for (const [trip, lat, lon, mode, route, , shown = 1] of list) {
     seen.add(trip);
     let m = markers.vehicles.get(trip);
     if (!m) {
@@ -488,6 +488,7 @@ function renderVehicles(list, myTrip) {
     }
     const el = m.getElement();
     el.firstChild.classList.toggle("mine", trip === myTrip);
+    el.style.opacity = shown;  // fading in before its first stop, out after its last
     el.style.zIndex = trip === myTrip ? 900 : 1;
   }
   for (const [trip, m] of markers.vehicles) {

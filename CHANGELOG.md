@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Live game: vehicles drive in for a moment before their first stop, growing in (fading in
+  on the flat map), and drive off after their last stop, shrinking away. They no longer pop
+  up at a stop and vanish. You can only board them during the timetabled run.
 - Live game: the clock runs at 9x (was 6x), so walking and vehicles are 1.5 times faster on
   screen, and rounds are 35 timetable minutes (still about 4 real minutes). Pings, fines and
   coffee last as many real seconds as before. The timetable time is small, without seconds.

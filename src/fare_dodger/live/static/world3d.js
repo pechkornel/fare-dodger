@@ -1182,19 +1182,20 @@ export class ToyTown {
     if (!this.origin) return;
     this.focus = this.local(s.player.pos[0], s.player.pos[1]);
     const seen = new Set();
-    for (const [trip, lat, lon, mode, , heading] of s.vehicles) {
+    for (const [trip, lat, lon, mode, , heading, shown = 1] of s.vehicles) {
       seen.add(trip);
       let rec = this.vehicles.get(trip);
       if (!rec) {
         // Born facing the way it drives and lying straight along its track (no trail yet),
-        // then popping in, instead of appearing sideways and swinging round.
-        rec = { ...makeVehicle(mode), heading, angle: heading, trail: [], age: 0 };
+        // then growing in as it drives up to its first stop, instead of appearing sideways.
+        rec = { ...makeVehicle(mode), heading, angle: heading, trail: [], vis: 0 };
         rec.root.scale.setScalar(0.001);
         this.vehicles.set(trip, rec);
         this.actors.add(rec.root);
       }
       this.retarget(rec, this.local(lat, lon));
       rec.heading = heading;   // the timetable knows which way it is going
+      rec.shown = shown;       // under 1 while driving in before its first stop or away after
       rec.mine = s.ride && s.ride.trip === trip;
     }
     for (const [trip, rec] of this.vehicles) {
@@ -1291,8 +1292,9 @@ export class ToyTown {
 
     for (const rec of this.vehicles.values()) {
       step(rec);
-      rec.age += dt;
-      rec.root.scale.setScalar(vehicleK * popIn(rec.age / 0.35));
+      // Eased towards the server's value, so it grows and shrinks smoothly between snapshots.
+      rec.vis += (rec.shown - rec.vis) * Math.min(1, dt * 6);
+      rec.root.scale.setScalar(vehicleK * popIn(rec.vis));
       rec.body.position.z = rec.mine ? Math.abs(Math.sin(t * 6)) * 0.25 : 0;
       articulate(rec, vehicleK, dt, t);
     }
