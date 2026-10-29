@@ -21,6 +21,7 @@ from typing import Any
 from fare_dodger.config import LiveConfig
 from fare_dodger.live.districts import District, DistrictPool
 from fare_dodger.live.game import YOU, LiveGame, Role, Seat, Status
+from fare_dodger.timeutil import format_hms, parse_hms
 
 __all__ = ["District", "Match", "RoundResult", "Team", "match_winner", "role_for"]
 
@@ -166,8 +167,17 @@ class Match:
         hunters = self._seats(self.teams[1 - runners_team], "Hunter")
         world = self.districts.get(self.district)
         return LiveGame(
-            world, self.cfg, self.rng.randrange(2**31), runners=runners, hunters=hunters
+            world, self._round_config(), self.rng.randrange(2**31), runners=runners, hunters=hunters
         )
+
+    def _round_config(self) -> LiveConfig:
+        """The rules for a new round: at a random time of day, if the config lists some."""
+        cfg = self.cfg
+        if not cfg.start_times:
+            return cfg
+        start = parse_hms(self.rng.choice(cfg.start_times))
+        start += 60 * self.rng.randint(0, cfg.start_jitter_minutes)
+        return cfg.model_copy(update={"start_time": format_hms(start)})
 
     def update(self) -> None:
         """Record the current round once it is over."""

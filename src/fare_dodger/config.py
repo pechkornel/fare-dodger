@@ -102,6 +102,10 @@ class NetworkConfig(_Frozen):
     #: sees at least this many departures. Set to 0 to keep every bus route.
     bus_min_departures_per_hour: float = Field(default=6.0, ge=0)
     bus_frequency_window: tuple[str, str] = ("08:00", "09:00")
+    #: Night buses never run in the frequency window: a bus route is also kept if, in this
+    #: window, its busiest in-area stop sees at least this many departures (0: never).
+    night_bus_min_departures_per_hour: float = Field(default=1.0, ge=0)
+    night_bus_window: tuple[str, str] = ("00:30", "04:30")
     #: Route short names always kept (if their mode is enabled) / always dropped.
     include_routes: NameSet = frozenset()
     exclude_routes: NameSet = frozenset()
@@ -128,7 +132,7 @@ class NetworkConfig(_Frozen):
         parse_hms(value)
         return value
 
-    @field_validator("bus_frequency_window")
+    @field_validator("bus_frequency_window", "night_bus_window")
     @classmethod
     def _valid_window(cls, value: tuple[str, str]) -> tuple[str, str]:
         if parse_hms(value[0]) >= parse_hms(value[1]):
@@ -212,6 +216,10 @@ class LiveConfig(_Frozen):
     """Real-time prototype: one human Dodger walking and riding against bot Bounty Hunters."""
 
     start_time: str = "08:00"
+    #: Each round of a match starts at one of these times (plus up to ``start_jitter_minutes``),
+    #: picked at random, so rounds are played at night too. Empty: always ``start_time``.
+    start_times: tuple[str, ...] = ()
+    start_jitter_minutes: int = Field(default=0, ge=0)
     duration_minutes: int = Field(default=35, gt=0)
     #: Timetable seconds that pass per real second.
     time_scale: float = Field(default=9.0, gt=0)
@@ -285,6 +293,13 @@ class LiveConfig(_Frozen):
     @classmethod
     def _valid_start(cls, value: str) -> str:
         parse_hms(value)
+        return value
+
+    @field_validator("start_times")
+    @classmethod
+    def _valid_starts(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for start in value:
+            parse_hms(start)
         return value
 
     @property

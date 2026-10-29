@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import itertools
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from fare_dodger.config import CircleArea, NetworkConfig
-from fare_dodger.gtfs.load import RawFeed
+from fare_dodger.gtfs.load import RawFeed, load_feed
 from fare_dodger.modes import Mode
 from fare_dodger.network.build import build_timetable, cache_key, load_or_build
 from fare_dodger.network.graph import strongly_connected_components
@@ -160,3 +161,22 @@ def test_walk_detour_factor(detour: float) -> None:
     pts = [[(47.5, 19.05)], [(47.5, 19.054)]]
     path = walking_transfers(pts, 400, 1.0, detour)[0]
     assert path.duration_s == pytest.approx(path.distance_m * detour, abs=1)
+
+
+def test_night_buses_are_kept_though_they_never_run_at_rush_hour(
+    mini_gtfs_dir: Path, fixture_network_config: NetworkConfig
+) -> None:
+    # N9 runs once, at 24:30: never in the 08:00-09:00 frequency window.
+    cfg = fixture_network_config.model_copy(
+        update={
+            "window_start": "07:30",
+            "window_end": "26:00",
+            "night_bus_window": ("24:00", "26:00"),
+        }
+    )
+    feed = load_feed(mini_gtfs_dir, date(2026, 11, 4), cfg.window_seconds)
+    rare = cfg.model_copy(update={"night_bus_min_departures_per_hour": 2.0})
+    assert "909" not in build_timetable(feed, rare).pat_route_name  # too rare even at night
+    night = cfg.model_copy(update={"night_bus_min_departures_per_hour": 0.5})
+    tt = build_timetable(feed, night)
+    assert "909" in tt.pat_route_name and "B2" not in tt.pat_route_id  # B2 stays out
