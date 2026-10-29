@@ -336,3 +336,14 @@ def test_bots_ping_their_team(world: World) -> None:
     game._bot_marks([False] * len(game.hunters.agents))
     marks = game.snapshot("bob")["marks"]
     assert [m["name"] for m in marks] == ["Hunter bot 1"]
+
+
+def test_rounds_start_at_different_times_of_day(world: World) -> None:
+    cfg = LiveConfig(start_times=("01:00", "13:00"), start_jitter_minutes=10)
+    match = Match([District("X", world)], cfg, seed=3, begin=False)
+    starts = {match._round_config().start_seconds for _ in range(40)}
+    assert {s // 3600 for s in starts} == {1, 13}
+    assert all(s % 3600 <= 10 * 60 for s in starts) and len(starts) > 2
+    assert Match([District("X", world)], LiveConfig(), seed=3, begin=False)._round_config() == (
+        LiveConfig()
+    )  # without start_times, always start_time

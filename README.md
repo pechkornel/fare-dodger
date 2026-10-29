@@ -55,7 +55,8 @@ teams, CS-style.
   for the hunters, so a 2v2 round can end 1–1. The hunters win the round outright by catching
   everyone. A match is quick (best of 3) or long (best of 6), picked in the menu: the first
   team past half of the regulation points wins (2 of 3 or 4 of 6 in 1v1).
-- **Rounds:** each round lasts about 4 real minutes (35 timetable minutes at 9× speed) and is
+- **Rounds:** each round starts at a random time of day, from the 🌙 night buses of the small
+  hours to the evening rush. It lasts about 4 real minutes (35 timetable minutes at 9× speed) and is
   played on a different Budapest district, picked at random from 21 around the city. The
   Danube is a wall: cross it on the bridges.
 - **Sides:** teams switch sides at halftime. After a tie, they switch every round until one

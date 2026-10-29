@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Live game: rounds start at a random time of day: the small hours (🌙 night buses only), the
+  morning and evening rushes, midday, evening (ADR 0018). Night bus routes are no longer
+  filtered out for never running at rush hour.
 - Live game: pings. Press the scroll wheel (middle click) on the map to mark a spot for
   your team, a pulsing 📍 with your name for 8 seconds, also on the minimap. Bots ping too:
   a Bounty Hunter bot marks a Dodger it spots, and a Dodger bot marks a Bounty Hunter

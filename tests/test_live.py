@@ -71,7 +71,10 @@ def m1_east_at_eight(world: World) -> int:
 
 
 def test_live_toml_matches_code_defaults() -> None:
-    assert live_config(LIVE_TOML) == LiveConfig()
+    live = live_config(LIVE_TOML)
+    # The server plays rounds around the clock; the code default (and the tests) keep 08:00.
+    assert "01:00" in live.start_times and live.start_jitter_minutes > 0
+    assert live.model_copy(update={"start_times": (), "start_jitter_minutes": 0}) == LiveConfig()
 
 
 def test_vehicle_moves_between_stops(world: World) -> None:
