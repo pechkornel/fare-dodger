@@ -348,12 +348,30 @@ def test_no_ticket_means_a_fine_and_being_held(world: World) -> None:
     assert dodger.pos != central  # free to go
 
 
-def test_cannot_pay_the_fine_is_game_over(world: World) -> None:
-    game = solo_game(world, "West", inspected_share=1.0, start_money_ft=300, fine_ft=1000)
-    game.wait_for(0)
-    game.step(1)
-    assert game.status is Status.CAUGHT
-    assert "fine" in (game.caught_by or "")
+def test_cannot_pay_the_fine_means_a_longer_hold_not_game_over(world: World) -> None:
+    game = solo_game(
+        world,
+        "West",
+        inspected_share=1.0,
+        start_money_ft=300,
+        fine_ft=1000,
+        fine_hold_s=60,
+        unpaid_hold_s=180,
+    )
+    board_first_departure(game)
+    assert game.status is Status.RUNNING
+    assert any("can't pay it all" in e.text for e in game.drain_events())
+    game.step(120)  # put off at Central at 08:02
+    held_until = game.dodger.held_until
+    assert held_until is not None and held_until - game.t > 60  # longer than a paid fine
+    assert game.snapshot()["fine_short"] is True
+    assert game.pings and game.pings[-1].node == node(world, "Central")  # reported
+    game.step(120)
+    assert game.dodger.held_until is not None  # still held after the usual minute
+    game.step(61)
+    dodger = game.dodger  # re-read: mypy keeps the narrowing from before step()
+    assert dodger.held_until is None and game.status is Status.RUNNING
+    assert (dodger.money, dodger.fines) == (0, 1)  # paid everything they had
 
 
 def test_sides_switch_at_halftime_and_every_overtime_round() -> None:

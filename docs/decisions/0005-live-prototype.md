@@ -74,7 +74,8 @@ for the chasers, and a choice between buying a ticket and riding without one.
   On boarding an inspected trip without a ticket, the Dodger is put off at the next stop and
   held for `fine_hold_s` (60 timetable seconds) while the fine is written. The position is
   reported to the Bounty Hunters (`fine_alerts_hunters`), and then `fine_ft` (1,000 Ft) is
-  paid. A Dodger who cannot pay the fine loses at once.
+  paid. A Dodger who cannot pay the fine loses at once. (Changed on 2026-10-29; see the
+  addendum below.)
 - **Look.** The client uses the Fredoka font, cream panels with thick outlines and hard
   shadows, emoji characters (🏃 Dodger, 🤠 Bounty Hunters), vehicle badges per mode, tinted
   OpenStreetMap tiles, and a "KONTROLL!" burst on inspections. Motion respects
@@ -97,3 +98,25 @@ The owner saw route lines and vehicles wobble at the stops.
   - A Douglas–Peucker pass removes jitter under 1.5 m.
   - Two rounds of corner cutting round the bends, at most 8 m along each segment, so long
     straights keep their corners on the street.
+
+## Addendum (2026-10-29): a fine you cannot pay no longer ends the round
+With `start_money_ft` at 1,000 Ft and `fine_ft` at 1,000 Ft, buying a single ticket
+(450 Ft) left a Dodger unable to pay a fine. From then on, one ride without a ticket on an
+inspected trip lost the round. Inspectors are hidden, so that was pure luck, and it went
+against buying tickets. In 200 bot rounds on Inner Pest against three bot Bounty Hunters,
+19% ended this way: more than the Bounty Hunters caught on the same vehicle (6%).
+
+The owner chose to keep the fine high and make not paying a penalty instead of a loss.
+Lowering the fine was considered and rejected: it only moves the point where you can no
+longer pay, and a fine under about three ticket prices makes riding without a ticket always
+cheaper than buying one, since 35% of trips are inspected.
+- A Dodger who cannot pay the whole fine pays what they have and is held for
+  `unpaid_hold_s` (180 timetable seconds, three times `fine_hold_s`).
+- As with every fine, the Bounty Hunters are told where the Dodger is, so the long hold is
+  dangerous.
+- The client says why the wait is longer (`fine_short` in the snapshot).
+
+Result, from the same 200 rounds:
+- The bot Dodger escapes 62% of rounds (was 52%).
+- Catches on foot went from 22% to 31%: many of the former inspector losses are now
+  Dodgers found while held.

@@ -597,9 +597,12 @@ function renderHud(s) {
       (r.alight_at ? ` · off at ${esc(r.alight_at)}` : " · E to get off") + "</span>";
   } else if (s.held_s !== null) {
     held = true;
+    const fine = s.fine_short
+      ? "You can't pay it all: they take what you have, and it takes longer."
+      : `${world.fine_ft} Ft.`;
     status = `📝 The inspectors are writing your fine… ` +
       `<b>${mmss(s.held_s / world.time_scale)}</b><br>` +
-      `<span class="muted">${world.fine_ft} Ft, and the Bounty Hunters know where you are!</span>`;
+      `<span class="muted">${fine} The Bounty Hunters know where you are!</span>`;
   } else if (coffee.brewing_s != null) {
     status = `☕ Making your coffee… <b>${mmss(coffee.brewing_s / world.time_scale)}</b><br>` +
       '<span class="muted">Stand still. Keep an eye out for Bounty Hunters!</span>';
