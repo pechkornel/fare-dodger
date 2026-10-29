@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import json
 from pathlib import Path
 
 import pytest
@@ -545,3 +546,26 @@ def test_asking_to_get_off_can_be_cancelled(world: World) -> None:
 def test_bounty_hunters_outnumber_the_dodger_by_two() -> None:
     assert LiveConfig().n_hunters == 3
     assert LiveConfig(hunter_extra=4).n_hunters == 5
+
+
+def test_a_district_drawn_bigger_downloads_its_map_again(tmp_path: Path) -> None:
+    # The bug: the marker only held layer versions, so a resized district still counted as
+    # downloaded and its first round stalled on Overpass.
+    from fare_dodger.cli import DistrictLoader
+    from fare_dodger.live.districts import DistrictSpec
+    from fare_dodger.workspace import Workspace
+
+    name, net = live_districts(LIVE_TOML)[-1]
+    assert net.area.kind == "circle"
+    loader = DistrictLoader(
+        Workspace.at(tmp_path), [DistrictSpec(name, net)], LiveConfig(), osm=True
+    )
+    marker = loader._marker(0)
+    marker.parent.mkdir(parents=True)
+    marker.write_text(json.dumps(loader.versions), encoding="utf-8")  # an old marker
+    assert not loader.cached(0)
+    marker.write_text(json.dumps(loader._wanted(0)), encoding="utf-8")
+    assert loader.cached(0)
+    area = net.area.model_copy(update={"radius_m": net.area.radius_m * 1.5})
+    bigger = DistrictSpec(name, net.model_copy(update={"area": area}))
+    assert not DistrictLoader(loader.workspace, [bigger], LiveConfig(), osm=True).cached(0)

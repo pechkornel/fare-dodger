@@ -360,13 +360,18 @@ class DistrictLoader:
     def _marker(self, i: int) -> Path:
         return self.workspace.osm_dir(self.specs[i].slug) / "layers.json"
 
+    def _wanted(self, i: int) -> dict[str, Any]:
+        """What the marker records: the layer versions and the area they cover (a district
+        drawn bigger downloads again)."""
+        return {**self.versions, "bbox": list(covering_bbox([area_bbox(self.specs[i].net.area)]))}
+
     def cached(self, i: int) -> bool:
         """Whether district ``i``'s layers are all on disk (it loads without downloading)."""
         try:
             found = json.loads(self._marker(i).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return False
-        return all(found.get(k) == v for k, v in self.versions.items())
+        return all(found.get(k) == v for k, v in self._wanted(i).items())
 
     def _landmarks_at(self, i: int) -> tuple[Path, BBox]:
         spec = self.specs[i]
@@ -415,7 +420,7 @@ class DistrictLoader:
                 )
                 out["water"] = get("water", folder / "water.json", bbox, read_water, download_water)
             if all(out.get(k) is not None for k in self.versions):
-                self._marker(i).write_text(json.dumps(self.versions), encoding="utf-8")
+                self._marker(i).write_text(json.dumps(self._wanted(i)), encoding="utf-8")
         return out
 
     def __call__(self, i: int) -> World:
