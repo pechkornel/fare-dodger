@@ -47,7 +47,7 @@ ticket_price_ft = 450
 inspected_share = 0.35       # trips with ticket inspectors aboard (hidden until you board)
 fine_ft = 1000               # caught without a ticket
 fine_hold_s = 60             # held at the next stop while the fine is processed
-unpaid_hold_s = 180          # held this long instead if you can't pay it all (you pay what you have)
+jail_s = 30.0                # can't pay it all: taken to the jail, held this many REAL seconds
 fine_alerts_hunters = true   # the inspectors report you to the Bounty Hunters
 # Packages (the Dodgers only): each goes to a landmark (a statue, monument, museum...) that one
 # or two rides reach. Stand at one to see where; E takes it; deliver it for the reward.

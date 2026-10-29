@@ -6,6 +6,10 @@ sculptures, fountains, monuments and war memorials, museums, theatres, churches,
 city walls, historic buildings, town halls, attractions and viewpoints. Wall plaques,
 Stolpersteine, tombs and galleries are left out. Each landmark is placed at its nearest street
 point, so it can be reached on foot even when it is a building.
+
+Police stations come with the same download: one of them is the district's jail (see
+:func:`pick_jail`), where Dodgers who cannot pay a fine are held. They are not package
+destinations.
 """
 
 from __future__ import annotations
@@ -22,7 +26,12 @@ from fare_dodger.live.streets import BBox, overpass
 from fare_dodger.live.world import Point, World
 
 #: Bump when the query or the kinds change so cached downloads are refreshed.
-LANDMARKS_VERSION = 1
+LANDMARKS_VERSION = 2
+#: The kind of the police stations (the jail), which are not package destinations.
+POLICE = "police"
+#: The jail is a police station at most this far from a station (metres), so the Bounty
+#: Hunters can get there by transport.
+JAIL_STATION_M = 400.0
 #: A landmark farther than this from any street cannot be reached on foot (metres). Larger
 #: than for cafés: a museum's centre can be deep inside its building.
 MAX_STREET_GAP_M = 80.0
@@ -61,6 +70,7 @@ _AMENITY = {
     "theatre": "theatre",
     "fountain": "fountain",
     "townhall": "building",
+    "police": POLICE,
 }
 
 
@@ -68,7 +78,7 @@ _AMENITY = {
 class Landmark:
     name: str
     #: statue, monument, castle, church, building, fountain, mural, museum, attraction,
-    #: viewpoint or theatre.
+    #: viewpoint, theatre, or police (the jail).
     kind: str
     pos: Point
 
@@ -161,3 +171,24 @@ def place_landmarks(landmarks: list[tuple[str, str, float, float]], world: World
             continue
         placed[name] = Landmark(name, kind, pos)
     return list(placed.values())
+
+
+def pick_jail(police: list[Landmark], world: World) -> Landmark | None:
+    """The district's jail: of the police stations within ``JAIL_STATION_M`` of a station, the
+    one nearest the middle of the network (``None`` without any)."""
+    xy = world.node_xy
+    middle = (sum(p[0] for p in xy) / len(xy), sum(p[1] for p in xy) / len(xy))
+
+    def near_transport(m: Landmark) -> bool:
+        return min(math.dist(m.pos, p) for p in xy) <= JAIL_STATION_M
+
+    candidates = [m for m in police if near_transport(m)]
+    return min(candidates, key=lambda m: (math.dist(m.pos, middle), m.name), default=None)
+
+
+def install_landmarks(landmarks: list[tuple[str, str, float, float]], world: World) -> None:
+    """Place ``landmarks`` in ``world``: the sights as package destinations, and a police
+    station as the jail."""
+    placed = place_landmarks(landmarks, world)
+    world.landmarks = [m for m in placed if m.kind != POLICE]
+    world.jail = pick_jail([m for m in placed if m.kind == POLICE], world)

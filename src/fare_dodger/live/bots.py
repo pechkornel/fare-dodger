@@ -35,6 +35,8 @@ class Ping:
     node: int
     #: Which Dodger was reported (index into the round's runners).
     runner: int = 0
+    #: The Dodger is known to stay at ``pos`` until this time (held for a fine, or in jail).
+    until: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +150,9 @@ class BountyHunters:
             share = k // m + (1 if i < k % m else 0)
             if share == 0:
                 continue
-            spread = reachable(self.world.tt, [ping.node], ping.time, PING_SPREAD_S).reached()
+            # A Dodger held in place cannot go far: cover only where they can get once free.
+            horizon = max(0, PING_SPREAD_S - int(max(0.0, ping.until - ping.time)))
+            spread = reachable(self.world.tt, [ping.node], ping.time, horizon).reached()
             targets += self._spread(spread or [ping.node], share, seed_node=ping.node)
         origins = [self._planning_node(a) for a in self.agents]
         for agent, target in zip(self.agents, self._assign(origins, targets), strict=True):
@@ -216,6 +220,13 @@ class BountyHunters:
                 nearest = self.world.nearest_node(agent.pos)
                 agent.returning_to = nearest if nearest is not None else agent.node
                 agent.follower.reset()
+            spot = self._held_spot(agent, t)
+            if spot is not None:  # at the reported station: walk to the door
+                if agent.returning_to is None:
+                    agent.returning_to = agent.node
+                    agent.follower.reset()
+                agent.pos = self.world.walk_towards(agent.follower, agent.pos, spot, step)
+                continue
             if agent.returning_to is not None:
                 home = self.world.node_xy[agent.returning_to]
                 agent.pos = self.world.walk_towards(agent.follower, agent.pos, home, step)
@@ -224,6 +235,17 @@ class BountyHunters:
                     agent.needs_replan = True
                 continue
             self._follow(agent, t)
+
+    def _held_spot(self, agent: Agent, t: float) -> Point | None:
+        """Where a Dodger is held (a fine, the jail), if this Bounty Hunter has reached the
+        reported station on foot and the Dodger is still held: stations are where the bots'
+        journeys end, and a jail can be a street away."""
+        if agent.trip is not None or (agent.plan is not None and t < agent.plan.arrival):
+            return None
+        for ping in self.last_pings:
+            if ping.until > t and agent.node == ping.node:
+                return ping.pos
+        return None
 
     def _follow(self, agent: Agent, t: float) -> None:
         if agent.plan is not None:

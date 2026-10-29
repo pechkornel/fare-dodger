@@ -509,6 +509,123 @@ export const STOP_GEO = mergeGeometries([
   coloured(rbox(0.5, 0.2, 0.2, 0.05), "#2f9e44", 0, -0.02, 3.05),
 ]);
 
+// --- the jail ------------------------------------------------------------------------------
+
+// A barred cell in front of the district's police station, sized for one person (ToyTown
+// scales it with the people): a concrete base, steel bars with a padlocked door, a bench, a
+// police-blue roof with "BÖRTÖN" signs, and a siren that flashes while someone is locked in.
+// Tall, with a roof that does not overhang: the game's camera looks down at about 40°, and
+// the prisoner must show between the front bars, not hide under the roof.
+const JAIL_HALF = 1.6;     // half the cell's width
+const JAIL_BARS = 4.3;     // bar height
+const JAIL_BASE = 0.2;
+const JAIL_ROOF = JAIL_BASE + JAIL_BARS;
+
+function signTexture(text) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 112;
+  const g = canvas.getContext("2d");
+  g.fillStyle = "#ffd43b";
+  g.fillRect(0, 0, 512, 112);
+  g.lineWidth = 12;
+  g.strokeStyle = INK;
+  g.strokeRect(6, 6, 500, 100);
+  g.fillStyle = INK;
+  g.font = '700 72px Fredoka, "Trebuchet MS", sans-serif';
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(text, 256, 60);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+const JAIL_SOLID = (() => {
+  const h = JAIL_HALF, top = JAIL_ROOF;
+  const parts = [
+    coloured(rbox(3.8, 3.8, JAIL_BASE, 0.1), "#adb5bd", 0, 0, JAIL_BASE / 2),
+    coloured(rbox(3.1, 3.1, 0.05, 0.02), "#868e96", 0, 0, JAIL_BASE + 0.02),
+    // Roof: police blue over a white band, and the siren's base.
+    coloured(rbox(3.75, 3.75, 0.18, 0.07), "#f8f9fa", 0, 0, top + 0.09),
+    coloured(rbox(3.65, 3.65, 0.6, 0.18), "#1971c2", 0, 0, top + 0.47),
+    coloured(rbox(1.3, 0.6, 0.24, 0.08), "#dee2e6", 0, 0, top + 0.89),
+    // A bench at the back, and the padlock on the door.
+    coloured(rbox(1.6, 0.55, 0.16, 0.05), "#c0814a", 0, h - 0.5, JAIL_BASE + 0.62),
+    coloured(rbox(0.14, 0.45, 0.6, 0.04), "#8a5a3b", -0.6, h - 0.5, JAIL_BASE + 0.3),
+    coloured(rbox(0.14, 0.45, 0.6, 0.04), "#8a5a3b", 0.6, h - 0.5, JAIL_BASE + 0.3),
+    coloured(rbox(0.4, 0.22, 0.42, 0.08), "#fcc419", 0.62, -h - 0.12, JAIL_BASE + 1.55),
+    coloured(rbox(0.26, 0.09, 0.26, 0.04), "#ced4da", 0.62, -h - 0.12, JAIL_BASE + 1.85),
+  ];
+  // Corner posts, and rails round the top and halfway up.
+  for (const [x, y] of [[-h, -h], [h, -h], [-h, h], [h, h]]) {
+    parts.push(coloured(rbox(0.36, 0.36, JAIL_BARS, 0.08), "#343a40", x, y, JAIL_BASE + JAIL_BARS / 2));
+  }
+  for (const z of [top - 0.1, JAIL_BASE + JAIL_BARS * 0.5]) {
+    for (const s of [-h, h]) {
+      parts.push(coloured(rbox(2 * h, 0.18, 0.18, 0.06), "#343a40", 0, s, z));
+      parts.push(coloured(rbox(0.18, 2 * h, 0.18, 0.06), "#343a40", s, 0, z));
+    }
+  }
+  return mergeGeometries(parts);
+})();
+
+// Bars: five a side, thin and without outlines so the prisoner shows between them. The front
+// door (the middle three bars on the south side) gets a yellow frame.
+const JAIL_BARS_GEO = (() => {
+  const h = JAIL_HALF;
+  const parts = [];
+  for (let i = 1; i <= 5; i++) {
+    const u = -h + (2 * h * i) / 6;
+    for (const s of [-h, h]) {
+      parts.push(coloured(rbox(0.1, 0.1, JAIL_BARS, 0.04), "#5c6670", u, s, JAIL_BASE + JAIL_BARS / 2));
+      parts.push(coloured(rbox(0.1, 0.1, JAIL_BARS, 0.04), "#5c6670", s, u, JAIL_BASE + JAIL_BARS / 2));
+    }
+  }
+  for (const x of [-0.8, 0.8]) {
+    parts.push(coloured(rbox(0.14, 0.14, JAIL_BARS - 0.3, 0.05), "#fab005", x, -h - 0.02,
+      JAIL_BASE + JAIL_BARS / 2));
+  }
+  return mergeGeometries(parts);
+})();
+
+export function makeJail() {
+  const root = new THREE.Group();
+  shadow(root, 2.6, 2.6);
+  root.add(new THREE.Mesh(JAIL_SOLID, VEHICLE_MAT), new THREE.Mesh(JAIL_SOLID, OUTLINE_PERSON));
+  root.add(new THREE.Mesh(JAIL_BARS_GEO, VEHICLE_MAT));
+  // "BÖRTÖN" (jail) on the roof's front and back.
+  const sign = new THREE.MeshBasicMaterial({ map: signTexture("BÖRTÖN") });
+  for (const side of [-1, 1]) {
+    const plane = new THREE.PlaneGeometry(2.9, 0.5);
+    plane.rotateX(Math.PI / 2);          // facing south
+    if (side > 0) plane.rotateZ(Math.PI);  // facing north
+    const mesh = new THREE.Mesh(plane, sign);
+    mesh.position.set(0, side * 1.85, JAIL_ROOF + 0.47);
+    root.add(mesh);
+  }
+  // The siren: unlit, so it glows; ToyTown flashes it while someone is locked in.
+  const lamp = (x) => {
+    const mesh = new THREE.Mesh(rbox(0.5, 0.44, 0.42, 0.15, 3), new THREE.MeshBasicMaterial());
+    mesh.position.set(x, 0, JAIL_ROOF + 1.21);
+    mesh.add(new THREE.Mesh(mesh.geometry, OUTLINE_PERSON));
+    root.add(mesh);
+    return mesh.material;
+  };
+  const red = lamp(-0.3), blue = lamp(0.3);
+  // Drawn after the people's see-through silhouettes (render order 1), so the prisoner shows
+  // plainly between the bars instead of as a ghost under the roof.
+  root.traverse((obj) => { obj.renderOrder = 3; });
+  const siren = (on, t) => {
+    const flash = on ? Math.floor(t * 5) % 2 : -1;
+    red.color.set(flash === 0 ? "#ff4d4f" : "#8f2d2d");
+    blue.color.set(flash === 1 ? "#4dabf7" : "#1d4e89");
+  };
+  siren(false, 0);
+  return { root, siren };
+}
+
 // --- buildings -----------------------------------------------------------------------------
 
 const BUILDING_VERT = `
@@ -806,8 +923,9 @@ export class ToyTown {
     this.trees.frustumCulled = false;
     this.town.add(this.trees);
     this.stops = null;
-    this.actors = new THREE.Group();  // vehicles and people
+    this.actors = new THREE.Group();  // vehicles, people and the jail
     this.scene.add(this.actors);
+    this.jail = null;
   }
 
   onAdd(map, gl) {
@@ -849,6 +967,7 @@ export class ToyTown {
     }
     this.vehicles.clear();
     this.people.clear();
+    if (this.jail) { this.actors.remove(this.jail.root); this.jail = null; }
 
     if (this.stops) this.town.remove(this.stops);
     this.stops = new THREE.InstancedMesh(STOP_GEO,
@@ -1124,6 +1243,16 @@ export class ToyTown {
     for (const [key, rec] of this.people) {
       if (!keys.has(key)) { this.actors.remove(rec.root); this.people.delete(key); }
     }
+
+    if (s.jail) {
+      if (!this.jail) {
+        this.jail = makeJail();
+        this.actors.add(this.jail.root);
+      }
+      const at = this.local(s.jail.pos[0], s.jail.pos[1]);
+      this.jail.root.position.set(at.x, at.y, 0);
+      this.jail.busy = s.jail.busy;
+    }
   }
 
   retarget(rec, target) {
@@ -1197,6 +1326,11 @@ export class ToyTown {
         rec.ring.material.opacity = 0.85 * (1 - pulse);
         rec.ring.visible = !riding;
       }
+    }
+
+    if (this.jail) {
+      this.jail.root.scale.setScalar(personK);   // a cell that fits the people
+      this.jail.siren(this.jail.busy, t);
     }
 
     if (this.stops && Math.abs(this.stopScale - personK) > 0.05) {

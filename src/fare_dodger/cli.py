@@ -34,7 +34,7 @@ from fare_dodger.live.buildings import (
 )
 from fare_dodger.live.cafes import CAFES_VERSION, download_cafes, pick_cafes, read_cafes
 from fare_dodger.live.districts import DistrictPool, DistrictSpec
-from fare_dodger.live.landmarks import download_landmarks, place_landmarks, read_landmarks
+from fare_dodger.live.landmarks import download_landmarks, install_landmarks, read_landmarks
 from fare_dodger.live.server import create_app
 from fare_dodger.live.streets import (
     STREETS_VERSION,
@@ -384,9 +384,9 @@ class DistrictLoader:
             found = _load_osm_extra("landmarks", path, bbox, read_landmarks, download_landmarks)
         world = self._built.get(i)
         if found is not None and world is not None and not world.landmarks:
-            world.landmarks = place_landmarks(found, world)
-            name = self.specs[i].name
-            typer.echo(f"  {name}: {len(world.landmarks)} landmarks for packages", err=True)
+            install_landmarks(found, world)
+            name, jail = self.specs[i].name, world.jail_spot()[1]
+            typer.echo(f"  {name}: {len(world.landmarks)} landmarks, jail at {jail}", err=True)
 
     def layers(self, i: int) -> dict[str, Any]:
         """District ``i``'s OpenStreetMap layers, downloading the missing ones."""
@@ -398,7 +398,8 @@ class DistrictLoader:
             out: dict[str, Any] = {
                 "cafes": get("cafés", folder / "cafes.json", bbox, read_cafes, download_cafes),
                 # Optional and never waited for: only the warmer downloads them (see
-                # fetch_landmarks). Without them, packages go to street spots.
+                # fetch_landmarks). Without them, packages go to street spots and the jail
+                # is a police post at a central station.
                 "landmarks": read_landmarks(folder / "landmarks.json", bbox),
             }
             if self.osm:
@@ -429,7 +430,7 @@ class DistrictLoader:
                 StreetGraph.from_osm(nodes, ways, world.proj.to_xy, spec.net.area.contains)
             )
         world.cafes = pick_cafes(layers["cafes"] or [], world, cfg.cafes_per_district)
-        world.landmarks = place_landmarks(layers["landmarks"] or [], world)
+        install_landmarks(layers["landmarks"] or [], world)
         if layers.get("buildings"):
             # Stops, stations and cafés stay reachable even when drawn inside a footprint.
             reachable_points = [

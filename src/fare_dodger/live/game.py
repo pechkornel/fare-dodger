@@ -116,8 +116,9 @@ class Traveller:
     tickets: int = 0
     tickets_bought: int = 0
     fines: int = 0
-    #: Held at a stop until this time while a fine is processed.
+    #: Held at a stop until this time while a fine is processed (in jail, if ``jailed``).
     held_until: float | None = None
+    jailed: bool = False
     #: Standing at a café until this time while a coffee is made.
     brewing_until: float | None = None
     #: Running on coffee until this time.
@@ -769,19 +770,32 @@ class LiveGame:
         ride.fined = True
         ride.alight_pos = dep.pos + 1
         name = self.world.tt.node_name[self.world.stops(ride.trip)[ride.alight_pos]]
-        short = "" if d.money >= self.cfg.fine_ft else " You can't pay it all: a long wait."
+        short = "" if d.money >= self.cfg.fine_ft else " You can't pay it all: it's jail for you."
         self._tell(d, "inspection", f"Ticket inspection! No ticket: you're off at {name}.{short}")
 
     def _pay_fine(self, d: Traveller) -> None:
-        """Pay the fine, or as much of it as ``d`` has."""
+        """Pay the fine, or as much of it as ``d`` has (when let out of jail)."""
         d.held_until = None
         paid = min(d.money, self.cfg.fine_ft)
         d.money -= paid
         d.fines += 1
-        if paid == self.cfg.fine_ft:
-            self._tell(d, "fine", f"You paid a {paid} Ft fine and are free to go.")
+        if d.jailed:
+            d.jailed = False
+            self._tell(d, "fine", f"The door opens: they kept all you had ({paid} Ft). Run!")
         else:
-            self._tell(d, "fine", f"You paid all you had ({paid} Ft) and are free to go.")
+            self._tell(d, "fine", f"You paid a {paid} Ft fine and are free to go.")
+
+    def _jail(self, who: Traveller, runner: Runner | None) -> None:
+        """``who`` cannot pay the fine: taken to the jail and held there, and the Bounty
+        Hunters are told where it is: a race between them and the jail door."""
+        pos, jail = self.world.jail_spot()
+        who.pos, who.jailed = pos, True
+        who.follower.reset()
+        who.held_until = self.t + self.cfg.jail_s * self.cfg.time_scale
+        self._tell(who, "jail", f"🚔 You can't pay: taken to {jail}. Run when they let you go!")
+        node = self.world.nearest_node(pos)
+        if runner is not None and node is not None:
+            self._report(runner, node, "The police reported", "The police jailed")
 
     def _ride(self, who: Traveller, ride: Ride) -> None:
         world = self.world
@@ -796,11 +810,12 @@ class LiveGame:
             who.ride = None
             name = world.tt.node_name[node]
             if ride.fined:
-                cfg = self.cfg
-                hold = cfg.fine_hold_s if who.money >= cfg.fine_ft else cfg.unpaid_hold_s
-                who.held_until = self.t + hold
-                self._tell(who, "fine", f"Held at {name} while the fine is written.")
                 runner = self._runner_of(who)
+                if who.money < self.cfg.fine_ft:
+                    self._jail(who, runner)
+                    return
+                who.held_until = self.t + self.cfg.fine_hold_s
+                self._tell(who, "fine", f"Held at {name} while the fine is written.")
                 if self.cfg.fine_alerts_hunters and runner is not None:
                     self._report(runner, node, "The inspectors reported", "Inspectors fined")
             else:
@@ -829,8 +844,10 @@ class LiveGame:
     def _report(
         self, runner: Runner, node: int, as_runner: str, as_hunter: str, tell_hunters: bool = True
     ) -> None:
-        """Tell the Bounty Hunters where ``runner`` is."""
-        self.pings.append(Ping(int(self.t), runner.traveller.pos, node, runner.index))
+        """Tell the Bounty Hunters where ``runner`` is (and until when, if held there)."""
+        d = runner.traveller
+        until = d.held_until if d.held_until is not None else 0.0
+        self.pings.append(Ping(int(self.t), d.pos, node, runner.index, until))
         place = self.world.tt.node_name[node]
         if runner.player is not None:
             self._emit("ping", f"{as_runner} you near {place}!", [runner.player])
@@ -1066,6 +1083,7 @@ class LiveGame:
             ]
         latest = self.latest_pings() if not as_runner else []
         last_ping = max(latest, key=lambda g: g.time) if latest else None
+        jail_pos, jail_name = world.jail_spot()
         d = me.traveller if me is not None else None
         return {
             "t": round(t, 1),
@@ -1085,8 +1103,14 @@ class LiveGame:
             "player": {"pos": self._latlon(p.pos), "state": state_name, "name": human.name},
             "wallet": {"money": p.money, "tickets": p.tickets} if p.pays_fares else None,
             "held_s": round(p.held_until - t) if p.held_until is not None else None,
-            # Held for a fine you can't pay in full (a longer wait).
-            "fine_short": p.held_until is not None and p.money < self.cfg.fine_ft,
+            "jailed": p.jailed,
+            # The district's jail, which everyone can see, and whether someone is locked in
+            # (the Bounty Hunters are told when that happens).
+            "jail": {
+                "name": jail_name,
+                "pos": self._latlon(jail_pos),
+                "busy": any(r.traveller.jailed for r in self.in_play()),
+            },
             "coffee": {
                 "cafe": (
                     self.world.cafes[cafe_here].name
