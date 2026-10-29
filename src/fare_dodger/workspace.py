@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from fare_dodger.config import LiveConfig, NetworkConfig, RulesConfig, data_dir, load_toml
 from fare_dodger.gtfs.download import ZIP_NAME, extract_feed, read_meta
@@ -39,6 +40,10 @@ class Workspace:
     @property
     def buildings_file(self) -> Path:
         return self.root / "osm" / "buildings.json"
+
+    def osm_dir(self, district: str) -> Path:
+        """One district's OpenStreetMap layers (streets, buildings, cafés, water)."""
+        return self.root / "osm" / district
 
     def feed_dir(self) -> tuple[Path, str]:
         """Extracted feed directory and a fingerprint identifying the feed contents."""
@@ -78,8 +83,9 @@ def network_config(path: Path | None) -> NetworkConfig:
 
 
 def live_districts(path: Path | None) -> list[tuple[str, NetworkConfig]]:
-    """The live game's districts: each ``[[district]]`` table (``name`` and polygon
-    ``vertices``) on top of the ``[network]`` section, or that section alone if there are none.
+    """The live game's districts: each ``[[district]]`` table on top of the ``[network]``
+    section, or that section alone if there are none. A district is a ``name`` with either a
+    polygon (``vertices``) or a circle (``center = [lat, lon]`` and ``radius_m``).
     """
     base = network_config(path)
     tables = load_toml(path).get("district", []) if path is not None else []
@@ -88,15 +94,17 @@ def live_districts(path: Path | None) -> list[tuple[str, NetworkConfig]]:
     return [
         (
             str(table["name"]),
-            NetworkConfig.model_validate(
-                {
-                    **base.model_dump(),
-                    "area": {"kind": "polygon", "vertices": table["vertices"]},
-                }
-            ),
+            NetworkConfig.model_validate({**base.model_dump(), "area": _district_area(table)}),
         )
         for table in tables
     ]
+
+
+def _district_area(table: dict[str, Any]) -> dict[str, Any]:
+    if "vertices" in table:
+        return {"kind": "polygon", "vertices": table["vertices"]}
+    lat, lon = table["center"]
+    return {"kind": "circle", "center_lat": lat, "center_lon": lon, "radius_m": table["radius_m"]}
 
 
 def rules_config(path: Path | None) -> RulesConfig:

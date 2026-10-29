@@ -7,8 +7,9 @@ const KEYMAP = {
   KeyW: "up", ArrowUp: "up", KeyS: "down", ArrowDown: "down",
   KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right",
 };
-const MODE_COLORS = { metro: "#7950f2", tram: "#fcc419", trolleybus: "#fd7e14", bus: "#339af0" };
-const MODE_ICONS = { metro: "🚇", tram: "🚋", trolleybus: "🚎", bus: "🚌" };
+const MODE_COLORS = { metro: "#7950f2", tram: "#fcc419", trolleybus: "#fd7e14", bus: "#339af0",
+  suburban_rail: "#2f9e44" };
+const MODE_ICONS = { metro: "🚇", tram: "🚋", trolleybus: "🚎", bus: "🚌", suburban_rail: "🚆" };
 const INK = "#2b2118";
 const MIN_ZOOM = 12.5;
 const MAX_ZOOM = 19;
@@ -53,7 +54,7 @@ let pendingEvents = [];  // messages from every snapshot since the last frame
 function init() {
   setupMinimap();
   showMenu();
-  loadDistrict(0);
+  loadBackdrop();
   requestAnimationFrame(frame);
 }
 
@@ -97,9 +98,10 @@ function showLobby(lobby) {
     el.className = `lobby-team${t === lobby.team ? " mine" : ""}`;
     el.innerHTML = `<h4>Team ${"AB"[t]}${t === lobby.team ? " (you)" : ""}</h4>${rows.join("")}`;
   });
-  $("start-game").hidden = !lobby.host;
-  $("lobby-wait").hidden = lobby.host;
-  $("lobby-wait").textContent = `Waiting for ${lobby.host_name || "the host"} to start…`;
+  $("start-game").hidden = !lobby.host || lobby.starting;
+  $("lobby-wait").hidden = lobby.host && !lobby.starting;
+  $("lobby-wait").textContent = lobby.starting ? "Loading the district…"
+    : `Waiting for ${lobby.host_name || "the host"} to start…`;
 }
 
 function enterGame() {
@@ -116,7 +118,7 @@ function quitToMenu() {
   $("lobby").hidden = true;
   showMenu();
   district = -1;
-  loadDistrict(0);
+  loadBackdrop();
 }
 
 function createMap(w) {
@@ -192,6 +194,13 @@ function frame() {
   }
   if (Object.keys(view).length) map.jumpTo(view);
   $("map").classList.toggle("toy", zoom >= SWITCH_ZOOM);
+}
+
+// Behind the menu: a district the server has ready, not necessarily the first one.
+async function loadBackdrop() {
+  let index = 0;
+  try { index = (await (await fetch("api/backdrop")).json()).district; } catch { /* first one */ }
+  return loadDistrict(index);
 }
 
 async function loadDistrict(index) {
@@ -421,7 +430,9 @@ function render(s) {
   renderParcels(s);
   cam.target = s.player.pos;
   if (match.round_over && shownRound !== match.round) showResult(s, match);
-  if (match.round_over && s.room && s.room.next_round_in !== null && !s.room.host) {
+  if (match.round_over && s.room && s.room.loading) {
+    $("again").textContent = "Loading the next district…";
+  } else if (match.round_over && s.room && s.room.next_round_in !== null && !s.room.host) {
     $("again").textContent = `Next round in ${Math.ceil(s.room.next_round_in)}…`;
   } else if (match.round_over && s.room && s.room.next_round_in !== null) {
     $("again").textContent = `Next round in ${Math.ceil(s.room.next_round_in)} · Enter: now`;

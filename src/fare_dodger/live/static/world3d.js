@@ -20,7 +20,8 @@ export function pitchForZoom(zoom) {
 
 const INK = "#2b2118";
 const SKIN = "#ffd6a5";
-const MODE_COLORS = { metro: "#7950f2", tram: "#fcc419", trolleybus: "#fd7e14", bus: "#339af0" };
+const MODE_COLORS = { metro: "#7950f2", tram: "#fcc419", trolleybus: "#fd7e14", bus: "#339af0",
+  suburban_rail: "#2f9e44" };
 const ROLE_COLORS = {
   dodger: "#40c057", hunter: "#fa5252", team: "#ffa8a8", wanted: "#ffd43b",
 };
@@ -169,6 +170,9 @@ const VEHICLES = {
     bogies: [[1.2], [], [0], [-1.2]], pantograph: 2, cabs: 2 },
   metro: { sections: [17, 17, 17], width: 2.8, height: 3.1, floor: 0.95, wheel: 0.85,
     bogies: [[5.8, -5.8], [5.8, -5.8], [5.8, -5.8]], cabs: 2, couplers: true },
+  // HÉV: a three-car suburban train, overhead power.
+  suburban_rail: { sections: [18, 18, 18], width: 2.85, height: 3.3, floor: 1.0, wheel: 0.85,
+    bogies: [[6, -6], [6, -6], [6, -6]], cabs: 2, couplers: true, pantograph: 1 },
 };
 const GLASS = "#a5d8f3";
 const VEHICLE_MAT = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap });

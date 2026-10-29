@@ -445,7 +445,8 @@ def test_live_toml_districts() -> None:
     districts = live_districts(LIVE_TOML)
     assert len(districts) >= 4
     assert districts[0][0] == "Inner Pest"
-    assert all(net.area.kind == "polygon" for _, net in districts)
+    assert all(net.area.kind in ("polygon", "circle") for _, net in districts)
+    assert sum(net.area.kind == "circle" for _, net in districts) >= 10  # around the city
     assert len({net.area.model_dump_json() for _, net in districts}) == len(districts)
     assert live_districts(None)[0][0] == "District"
 

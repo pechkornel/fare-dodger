@@ -7,6 +7,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Live game: the whole city. There are 21 districts: the six inner ones and 15 more around
+  Budapest, from Óbuda and Újpest to Csepel and Kispest, plus five on the Danube bridges.
+  The HÉV suburban trains run too.
+  - Districts load on demand. The next round's district loads while the current round is
+    played, and at most 6 are kept in memory (`--keep`).
+  - Map data is downloaded per district into `data/osm/<district>/`, in the background.
+    Districts join the rotation once they are downloaded. ADR 0015.
+- Live game: the Danube and other water are walls. Cross on the bridges, so one bank can be
+  cut off. Margitsziget and the other islands are dry land.
+
+### Added
 - Admin page (`/admin`, on when `FARE_DODGER_ADMIN_TOKEN` is set): version and commit, uptime,
   memory, players, every game with a Close button, the timetable in use, and an **Update now**
   button. The button asks the host's updater (`deploy/install-updater.sh`, a systemd path

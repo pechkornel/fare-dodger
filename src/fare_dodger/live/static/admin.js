@@ -40,7 +40,8 @@ function render(status) {
     ["Players", status.players],
     ["Games", `${status.rooms.length} / ${status.limits.max_matches}`],
     ["Timetable", `${info.feed} · ${info.service_date}`],
-    ["Districts", info.districts],
+    ["Districts", `${status.districts.playable} / ${status.districts.total} downloaded · `
+      + `${status.districts.loaded.length} in memory`],
     ["Per address", `${status.limits.max_per_ip} games`],
   ];
   $("stats").innerHTML = stats

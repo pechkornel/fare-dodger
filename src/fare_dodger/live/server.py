@@ -47,6 +47,7 @@ from fastapi.staticfiles import StaticFiles
 
 from fare_dodger.config import LiveConfig
 from fare_dodger.live.admin import Admin, memory_mib
+from fare_dodger.live.districts import DistrictPool
 from fare_dodger.live.game import Keys, LiveGame, Role, world_view
 from fare_dodger.live.match import District, Match, Team
 
@@ -104,6 +105,10 @@ class Room:
     last_input: float = field(default_factory=time.monotonic)
     task: asyncio.Task[None] | None = None
     lobby_dirty: bool = True
+    #: The first district is loading (in the background) for a match about to start.
+    starting: bool = False
+    #: Background work (district loading) kept alive while it runs.
+    tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     #: Each round starts with a countdown (real seconds) while nobody can move.
     frozen_game: LiveGame | None = None
     frozen_until: float = 0.0
@@ -135,6 +140,7 @@ class Room:
             "host": self.host == pid,
             "host_name": self.members[self.host].name if self.host in self.members else "",
             "teams": teams,
+            "starting": self.starting,
         }
 
 
@@ -144,21 +150,33 @@ def clean_name(value: object, fallback: str) -> str:
 
 
 def create_app(
-    districts: list[District],
+    districts: list[District] | DistrictPool,
     cfg: LiveConfig,
     limits: Limits | None = None,
     admin: Admin | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Fare Dodger live", docs_url=None, redoc_url=None)
-    views = [{**world_view(d.world, cfg), "name": d.name} for d in districts]
+    pool = districts if isinstance(districts, DistrictPool) else DistrictPool.of(districts)
+    views: dict[int, dict[str, Any]] = {}
     caps = limits or Limits.from_env()
     rooms: dict[str, Room] = {}
 
     @app.get("/api/world/{index}")
-    def get_world(index: int) -> dict[str, Any]:
-        if not 0 <= index < len(views):
+    async def get_world(index: int) -> dict[str, Any]:
+        if not 0 <= index < len(pool):
             raise HTTPException(status_code=404, detail="no such district")
+        if index not in views:
+            world = await pool.prepare(index)
+            views[index] = {**world_view(world, cfg), "name": pool.name(index)}
         return views[index]
+
+    @app.get("/api/backdrop")
+    def backdrop() -> dict[str, int]:
+        """The district behind the menu: one in memory, else a downloaded one (never one that
+        would have to be downloaded first)."""
+        playable = pool.playable()
+        loaded = [i for i in pool.loaded() if i in playable]
+        return {"district": loaded[-1] if loaded else playable[0]}
 
     @app.get("/healthz")
     def health() -> dict[str, Any]:
@@ -193,7 +211,7 @@ def create_app(
             view.update(
                 round=match.round_number,
                 score=[a, b],
-                district=match.districts[match.district].name,
+                district=match.districts.name(match.district),
                 over=match.winner is not None,
             )
         return view
@@ -215,6 +233,11 @@ def create_app(
                 "idle_s": caps.idle_s,
             },
             "players": sum(len(r.members) for r in rooms.values()),
+            "districts": {
+                "loaded": [pool.name(i) for i in pool.loaded()],
+                "playable": len(pool.playable()),
+                "total": len(pool),
+            },
             "rooms": [room_view(r) for r in rooms.values()],
             "update": a.update_state(),
         }
@@ -279,7 +302,20 @@ def create_app(
         room.lobby_dirty = True
         return room
 
+    def background(room: Room, coro: Any) -> None:
+        task = asyncio.ensure_future(coro)
+        room.tasks.add(task)
+        task.add_done_callback(room.tasks.discard)
+
+    def preload(room: Room, index: int) -> None:
+        """Load a district in the background (a no-op when it is ready or loading)."""
+        if not pool.ready(index):
+            background(room, pool.prepare(index))
+
     def start_match(room: Room, start: Role | None = None) -> None:
+        """Set up a match; it starts once its first district is loaded (in the background)."""
+        if room.starting or room.match is not None:
+            return
         teams = []
         for t in (0, 1):
             players = [(m.pid, m.name) for m in room.team_members(t)]
@@ -287,8 +323,29 @@ def create_app(
             teams.append(Team(default if len(players) != 1 else players[0][1], players))
         seed = cfg.seed if cfg.seed is not None else random.randrange(2**31)
         first = start or random.choice((Role.DODGER, Role.HUNTER))
-        room.match = Match(districts, cfg, seed, teams=teams, size=room.size, start=first)
-        room.round_over_at = None
+        match = Match(pool, cfg, seed, teams=teams, size=room.size, start=first, begin=False)
+
+        def begin() -> None:
+            match.begin()
+            room.match = match
+            room.round_over_at = None
+
+        if pool.ready(match.upcoming_district()):
+            begin()
+            return
+        room.starting = True
+        room.lobby_dirty = True
+
+        async def load_then_begin() -> None:
+            try:
+                await pool.prepare(match.upcoming_district())
+            finally:
+                room.starting = False
+                room.lobby_dirty = True
+            if room.code in rooms:
+                begin()
+
+        background(room, load_then_begin())
 
     def leave(room: Room, pid: str) -> None:
         room.members.pop(pid, None)
@@ -348,6 +405,8 @@ def create_app(
         if room.frozen_game is not match.game:
             room.frozen_game, room.frozen_until = match.game, now + cfg.freeze_s
             room.round_over_at = None
+            # The next round's district loads while this round is played.
+            preload(room, match.upcoming_district())
         if not room.frozen():
             match.game.step(dt * cfg.time_scale)
         match.update()
@@ -355,7 +414,15 @@ def create_app(
             if room.round_over_at is None:
                 room.round_over_at = now
             elif now - room.round_over_at >= ROUND_BREAK_S:
-                match.next_round()
+                next_round(room, match)
+
+    def next_round(room: Room, match: Match) -> None:
+        """Start the next round, or wait (a little longer break) until its district is in."""
+        upcoming = match.upcoming_district()
+        if pool.ready(upcoming):
+            match.next_round()
+        else:
+            preload(room, upcoming)
 
     def snapshot(room: Room, match: Match, pid: str, now: float) -> dict[str, Any]:
         next_in = None
@@ -371,6 +438,7 @@ def create_app(
                 "host": room.host == pid,
                 "next_round_in": next_in,
                 "players": len(room.members),
+                "loading": next_in is not None and not pool.ready(match.upcoming_district()),
             },
         }
 
@@ -392,8 +460,8 @@ def create_app(
         if kind == "restart" and host and match.winner is not None:
             room.match = None
             room.lobby_dirty = True
-        elif kind == "next" and host:
-            match.next_round()
+        elif kind == "next" and host and match.round_recorded:
+            next_round(room, match)
         elif pid in match.game.humans and (kind == "keys" or not room.frozen()):
             apply_message(match.game, msg, pid)
 

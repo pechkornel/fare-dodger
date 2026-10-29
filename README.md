@@ -56,7 +56,8 @@ teams, CS-style.
   everyone. The first team past half of the regulation points wins (6 of 10 in 1v1, 11 of 20
   in 2v2).
 - **Rounds:** each round lasts about 4 real minutes (25 timetable minutes at 6× speed) and is
-  played on a different Budapest district (six on both banks of the Danube).
+  played on a different Budapest district, picked at random from 21 around the city. The
+  Danube is a wall: cross it on the bridges.
 - **Sides:** teams switch sides at halftime. After a tie, they switch every round until one
   team leads by two. **Esc** leaves to the menu.
 - **Controls:** **WASD** move you up, left, down and right on the screen; hold two for a
@@ -118,9 +119,13 @@ docker compose --profile tunnel up -d   # also start cloudflared
 docker compose logs -f game
 ```
 
-- **First start:** the game downloads the BKK feed (62 MB), the OpenStreetMap streets,
-  buildings and cafés (about 40 MB, from Overpass with two mirrors as fallback), and builds the six
-  district networks into `./data`. This takes a few minutes; later starts take seconds. On
+- **First start:** the game downloads the BKK feed (62 MB) and builds the first district.
+  Then it downloads the other districts' OpenStreetMap streets, buildings, cafés and water in
+  the background, about 2–4 MB each, from Overpass with mirrors as fallback. They go into
+  `data/osm/<district>/`. Overpass can be slow, so this can take an hour or two for all 21
+  districts. Matches use the districts already downloaded, so the game is playable right
+  away. Districts load into memory when a round needs them (at most 6 at once, `--keep`),
+  and the next round's district loads during the current round. Later starts take seconds. On
   every start it checks for a newer feed (a conditional request), and keeps the cached one if
   BKK can't be reached. The service day is picked automatically: the Tuesday, Wednesday or
   Thursday with the most trips inside the feed's validity (`service_date = "auto"` in
