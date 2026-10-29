@@ -577,7 +577,7 @@ function setChip(id, value) {
 
 function renderHud(s) {
   const hunter = s.role === "hunter";
-  $("clock").textContent = s.clock;
+  $("clock").textContent = `🕗 ${s.clock.slice(0, 5)}`; // timetable time, small: the timer counts
   $("remaining").textContent = `⏳ ${mmss(s.remaining_s / world.time_scale)}`;
   $("wallet").hidden = !s.wallet;
   if (s.wallet) {

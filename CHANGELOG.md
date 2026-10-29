@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Live game: the clock runs at 9x (was 6x), so walking and vehicles are 1.5 times faster on
+  screen, and rounds are 35 timetable minutes (still about 4 real minutes). Pings, fines and
+  coffee last as many real seconds as before. The timetable time is small, without seconds.
 - Live game: buying a coffee reports you to the Bounty Hunters with the usual alert,
   at that exact café. Camping in cafés was too strong.
 - Live game: matches are a quick best of 3 or a long best of 6, picked in the menu (for

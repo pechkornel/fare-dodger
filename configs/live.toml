@@ -30,9 +30,9 @@ vertices = [
 
 [live]
 start_time = "08:00"
-duration_minutes = 25
-time_scale = 6.0             # timetable seconds per real second (25 min = about 4 real minutes)
-ping_every_s = 180           # the Bounty Hunters learn the Dodger's position this often
+duration_minutes = 35
+time_scale = 9.0             # timetable seconds per real second (35 min = about 4 real minutes)
+ping_every_s = 270           # the Bounty Hunters learn the Dodger's position this often (30 s)
 hunter_extra = 2             # Bounty Hunters = Dodgers + 2 (bots fill the team)
 freeze_s = 3.0               # real seconds of countdown before each round
 walk_speed_kmh = 10.0        # a brisk jog; walking is along the streets
@@ -45,7 +45,7 @@ start_money_ft = 1000         # deliver packages to earn more
 ticket_price_ft = 450
 inspected_share = 0.35       # trips with ticket inspectors aboard (hidden until you board)
 fine_ft = 1000               # caught without a ticket
-fine_hold_s = 60             # held at the next stop while the fine is processed
+fine_hold_s = 90             # held at the next stop while the fine is processed (10 s)
 jail_s = 30.0                # can't pay it all: taken to the jail, held this many REAL seconds
 fine_alerts_hunters = true   # the inspectors report you to the Bounty Hunters
 # Packages (the Dodgers only): each goes to a landmark (a statue, monument, museum...) that one
@@ -60,8 +60,8 @@ package_max_m = 2000.0
 cafes_per_district = 4
 cafe_radius_m = 25.0
 coffee_price_ft = 500
-coffee_brew_s = 18           # timetable seconds (3 real seconds at 6x)
-coffee_boost_s = 120         # timetable seconds (20 real seconds at 6x)
+coffee_brew_s = 27           # timetable seconds (3 real seconds at 9x)
+coffee_boost_s = 180         # timetable seconds (20 real seconds at 9x)
 coffee_speed_kmh = 16.0      # jogging is 10; buses and trams average 15-20
 # Match: first to win more than half of the regulation rounds (4 of 6); sides switch at
 # halftime; at 3-3, sides switch every round until one team leads by two. Rooms pick a quick

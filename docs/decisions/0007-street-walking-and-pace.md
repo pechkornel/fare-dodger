@@ -38,6 +38,10 @@ Riding should still beat walking.
 - **Pace:** `time_scale` goes from 10 to 6, so vehicles move 40% slower on screen.
   `duration_minutes` goes from 30 to 25, so a round lasts about 4 real minutes, inside the
   3–5 minutes the owner wants.
+  *Later:* once the districts were 1.5 times wider, walking and riding felt slow again.
+  `time_scale` goes to 9 and `duration_minutes` to 35, so a round is still about 4 real
+  minutes. The timings meant in real seconds keep their length: pings every 270 s (30 real
+  seconds), fine hold 90 s (10), coffee 27 + 180 s (3 + 20).
 - **Jogging speed:** `walk_speed_kmh` goes from 5 to 10, so characters move about 20% faster
   on screen. Street routes are about 1.3× longer than the straight line, so jogging covers
   about 7.7 km/h as the crow flies. Buses and trams average 15–20 km/h along their route and
