@@ -91,7 +91,7 @@ function showLobby(lobby) {
   $("menu").hidden = true;
   $("lobby").hidden = false;
   $("lobby-code").textContent = lobby.code;
-  $("lobby-size").textContent = `${lobby.size}v${lobby.size}`;
+  $("lobby-size").textContent = `${lobby.size}v${lobby.size} · best of ${lobby.rounds}`;
   lobby.teams.forEach((team, t) => {
     const rows = team.players.map((name) => `<div>👤 ${esc(name)}</div>`)
       .concat(Array.from({ length: team.bots }, () => '<div class="bot">🤖 bot</div>'));
@@ -712,7 +712,7 @@ function showResult(s, m) {
     $("result-title").textContent =
       roundWon ? "Round won!" : roundWon === null ? "Round drawn" : "Round lost!";
     if (m.next_role && m.next_role !== s.role) {
-      const why = m.round === m.regulation / 2 ? "Halftime! "
+      const why = m.round === Math.floor(m.regulation / 2) ? "Halftime! "
         : m.round === m.regulation ? "Overtime: win by two! " : "";
       text += ` ${why}You switch sides: next round you are the ${ROLE_LABEL[m.next_role]}.`;
     }
@@ -808,10 +808,25 @@ $("follow").addEventListener("click", () => setFollow(true));
 $("to-menu").addEventListener("click", quitToMenu);
 $("ride-toggle").addEventListener("click", () => send({ type: "use" }));
 try { $("player-name").value = localStorage.getItem("fare-dodger-name") || ""; } catch { /* */ }
-$("play-solo").addEventListener("click", () => openGame({ type: "solo", name: playerName() }));
+// Match length (best of 3 or 6), remembered like the name.
+let rounds = 3;
+try { rounds = Number(localStorage.getItem("fare-dodger-rounds")) || 3; } catch { /* */ }
+function pickRounds(n) {
+  rounds = n;
+  for (const b of document.querySelectorAll("#match-length [data-rounds]")) {
+    b.classList.toggle("chosen", Number(b.dataset.rounds) === n);
+  }
+  try { localStorage.setItem("fare-dodger-rounds", String(n)); } catch { /* */ }
+}
+for (const button of document.querySelectorAll("#match-length [data-rounds]")) {
+  button.addEventListener("click", () => pickRounds(Number(button.dataset.rounds)));
+}
+pickRounds(rounds);
+$("play-solo").addEventListener("click", () =>
+  openGame({ type: "solo", rounds, name: playerName() }));
 for (const button of document.querySelectorAll("#menu [data-size]")) {
   button.addEventListener("click", () =>
-    openGame({ type: "create", size: Number(button.dataset.size), name: playerName() }));
+    openGame({ type: "create", size: Number(button.dataset.size), rounds, name: playerName() }));
 }
 $("join").addEventListener("click", () => {
   const code = $("join-code").value.trim().toUpperCase();

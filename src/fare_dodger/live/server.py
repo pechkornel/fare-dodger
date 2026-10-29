@@ -2,9 +2,11 @@
 
 The server owns the game state. A player opens ``/ws`` and sends one of::
 
-    {"type": "create", "size": 1 | 2 | 3, "name": str}   # a new room (1v1, 2v2 or 3v3)
+    {"type": "create", "size": 1 | 2 | 3, "rounds": 3 | 6, "name": str}  # 1v1, 2v2 or 3v3
     {"type": "join", "code": str, "name": str}           # an open room, by its code
-    {"type": "solo", "role": "dodger" | "hunter" | null}  # a room of one, started at once
+    {"type": "solo", "role": "dodger" | "hunter" | null, "rounds": 3 | 6}  # started at once
+
+``rounds`` is the match length: best of 3 (quick) or best of 6 (long; the default).
 
 (``/ws?role=dodger`` is a shortcut for ``solo``.) In the lobby players join the smaller team;
 any player may ``{"type": "team"}`` to switch if there is room, and the host sends
@@ -65,6 +67,8 @@ SEND_TIMEOUT_S = 0.5
 #: During a match, a room closes after this many times ``idle_s`` without input.
 IN_MATCH_IDLE_FACTOR = 5
 SIZES = (1, 2, 3)
+#: Match lengths a room can pick (regulation rounds): quick and long.
+ROUNDS = (3, 6)
 CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # no I or O
 NAME_MAX = 16
 
@@ -103,6 +107,8 @@ class Room:
     code: str
     size: int
     host: str
+    #: Regulation rounds of the room's matches.
+    rounds: int = ROUNDS[-1]
     members: dict[str, Member] = field(default_factory=dict)
     match: Match | None = None
     last_input: float = field(default_factory=time.monotonic)
@@ -138,6 +144,7 @@ class Room:
             "type": "lobby",
             "code": self.code,
             "size": self.size,
+            "rounds": self.rounds,
             "you": pid,
             "team": self.members[pid].team,
             "host": self.host == pid,
@@ -275,7 +282,7 @@ def create_app(
             msg = f"You are already in {caps.max_per_ip} games from this connection."
             raise RefusedError(msg)
 
-    def new_room(size: int, member: Member) -> Room:
+    def new_room(size: int, member: Member, rounds: object = None) -> Room:
         if len(rooms) >= caps.max_matches:
             msg = "The server is full right now. Try again in a few minutes."
             raise RefusedError(msg)
@@ -283,7 +290,7 @@ def create_app(
         code = "".join(secrets.choice(CODE_LETTERS) for _ in range(4))
         while code in rooms:
             code = "".join(secrets.choice(CODE_LETTERS) for _ in range(4))
-        room = Room(code, size, member.pid)
+        room = Room(code, size, member.pid, rounds if rounds in ROUNDS else ROUNDS[-1])
         room.members[member.pid] = member
         rooms[code] = room
         room.task = asyncio.create_task(run_room(room))
@@ -332,7 +339,8 @@ def create_app(
             teams.append(Team(default if len(players) != 1 else players[0][1], players))
         seed = cfg.seed if cfg.seed is not None else random.randrange(2**31)
         first = start or random.choice((Role.DODGER, Role.HUNTER))
-        match = Match(pool, cfg, seed, teams=teams, size=room.size, start=first, begin=False)
+        match_cfg = cfg.model_copy(update={"regulation_rounds": room.rounds})
+        match = Match(pool, match_cfg, seed, teams=teams, size=room.size, start=first, begin=False)
 
         def begin() -> None:
             match.begin()
@@ -498,12 +506,12 @@ def create_app(
             member = Member(pid, clean_name(hello.get("name"), "Player"), ws, ip, 0)
             if kind == "create":
                 size = hello.get("size")
-                room = new_room(size if size in SIZES else 1, member)
+                room = new_room(size if size in SIZES else 1, member, hello.get("rounds"))
             elif kind == "join":
                 room = join_room(str(hello.get("code", "")), member)
             elif kind == "solo":
                 member.name = clean_name(hello.get("name"), "You")
-                room = new_room(1, member)
+                room = new_room(1, member, hello.get("rounds"))
                 wanted = hello.get("role")
                 start_match(room, Role(wanted) if wanted in ("dodger", "hunter") else None)
             else:

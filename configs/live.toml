@@ -63,9 +63,10 @@ coffee_price_ft = 500
 coffee_brew_s = 18           # timetable seconds (3 real seconds at 6x)
 coffee_boost_s = 120         # timetable seconds (20 real seconds at 6x)
 coffee_speed_kmh = 16.0      # jogging is 10; buses and trams average 15-20
-# Match: first to win more than half of the regulation rounds (6 of 10); sides switch at
-# halftime; at 5-5, sides switch every round until one team leads by two.
-regulation_rounds = 10
+# Match: first to win more than half of the regulation rounds (4 of 6); sides switch at
+# halftime; at 3-3, sides switch every round until one team leads by two. Rooms pick a quick
+# match (best of 3) or a long one (best of 6, this default).
+regulation_rounds = 6
 start_role = "dodger"
 # OpenFreeMap's vector tiles (OpenMapTiles schema, free, no key). The client draws them in its
 # own cartoon style, flat when zoomed out, and grows 3D houses from the building footprints
