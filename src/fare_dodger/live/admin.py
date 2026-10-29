@@ -13,9 +13,9 @@ which the admin page shows.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
-import resource
 import secrets
 import sys
 import time
@@ -89,5 +89,9 @@ def memory_mib() -> float:
         for line in status.read_text().splitlines():
             if line.startswith("VmRSS:"):
                 return round(int(line.split()[1]) / 1024, 1)
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # macOS: bytes, peak only
+    try:
+        resource = importlib.import_module("resource")  # Unix only
+    except ImportError:
+        return 0.0  # not measured on Windows
+    peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)  # macOS: bytes, peak only
     return round(peak / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)
