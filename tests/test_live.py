@@ -324,7 +324,9 @@ def test_ticket_is_used_on_boarding_and_passes_inspection(world: World) -> None:
 
 
 def test_no_ticket_means_a_fine_and_being_held(world: World) -> None:
-    game = solo_game(world, "West", inspected_share=1.0, fine_ft=1000, fine_hold_s=60)
+    game = solo_game(
+        world, "West", inspected_share=1.0, start_money_ft=2000, fine_ft=1000, fine_hold_s=60
+    )
     board_first_departure(game)
     ride = game.dodger.ride
     assert ride is not None and ride.fined

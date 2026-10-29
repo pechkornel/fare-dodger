@@ -233,7 +233,7 @@ class LiveConfig(_Frozen):
     #: Minimum travel time (minutes) from every Bounty Hunter to the Dodger at the start.
     min_start_distance_min: int = Field(default=8, ge=0)
     #: Money (forints) at the start; a single ticket covers one ride and is used on boarding.
-    start_money_ft: int = Field(default=2000, ge=0)
+    start_money_ft: int = Field(default=1000, ge=0)
     ticket_price_ft: int = Field(default=450, ge=0)
     #: Share of trips with ticket inspectors aboard; nobody knows which until they board.
     inspected_share: float = Field(default=0.35, ge=0, le=1)
@@ -243,6 +243,14 @@ class LiveConfig(_Frozen):
     fine_hold_s: int = Field(default=60, ge=0)
     #: The inspectors report a fined Dodger's position to the Bounty Hunters.
     fine_alerts_hunters: bool = True
+    #: Packages (the Dodgers only): ``packages_waiting`` wait around the district; accepting
+    #: one (E, within ``package_radius_m``) gives a destination ``package_min_m`` to
+    #: ``package_max_m`` away, and delivering it earns ``package_reward_ft``.
+    packages_waiting: int = Field(default=3, ge=0)
+    package_reward_ft: int = Field(default=1200, ge=0)
+    package_radius_m: float = Field(default=25.0, gt=0)
+    package_min_m: float = Field(default=600.0, ge=0)
+    package_max_m: float = Field(default=1600.0, gt=0)
     #: Coffee (the Dodger only): bought at a café for ``coffee_price_ft``, made in
     #: ``coffee_brew_s`` (standing still), then running at ``coffee_speed_kmh`` for
     #: ``coffee_boost_s`` (timetable seconds; at 6x, 3 and 20 real seconds).

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import itertools
 import math
+import random
 from bisect import bisect_right
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -168,6 +169,27 @@ class World:
             if streets is not None
             else list(self.node_xy)
         )
+
+    def random_spot(
+        self, rng: random.Random, away_from_stops_m: float = 60.0, tries: int = 60
+    ) -> Point | None:
+        """A random walkable point: on a street (near a station without street data), inside
+        the area, outside every building and away from the stops."""
+        for _ in range(tries):
+            if self.streets is not None and len(self.streets):
+                p = rng.choice(self.streets.xy)
+            else:
+                bx, by = rng.choice(self.node_xy)
+                angle, r = rng.uniform(0, 2 * math.pi), rng.uniform(80.0, 250.0)
+                p = (bx + r * math.cos(angle), by + r * math.sin(angle))
+            if not self.contains(p):
+                continue
+            if self.buildings is not None and self.buildings.at(p) is not None:
+                continue
+            if any(distance(p, q) < away_from_stops_m for q in self.stop_xy):
+                continue
+            return p
+        return None
 
     def stop_distance(self, p: Point, node: int) -> float:
         """How far ``p`` is from station ``node``: its centre, where it meets the street, or
