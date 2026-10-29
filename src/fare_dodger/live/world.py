@@ -26,8 +26,8 @@ from fare_dodger.modes import Mode
 from fare_dodger.network.timetable import Timetable
 
 if TYPE_CHECKING:
+    from fare_dodger.live.buildings import Buildings
     from fare_dodger.live.cafes import Cafe
-    from fare_dodger.live.parks import Parks
 
 Point = tuple[float, float]
 
@@ -101,8 +101,8 @@ class World:
         self.stop_xy = list(self.node_xy)
         #: Coffee shops (see :mod:`fare_dodger.live.cafes`).
         self.cafes: list[Cafe] = []
-        #: Open ground walkable in any direction (see :mod:`fare_dodger.live.parks`).
-        self.parks: Parks | None = None
+        #: Footprints that block walking (see :mod:`fare_dodger.live.buildings`).
+        self.buildings: Buildings | None = None
         self.trip_pattern = [0] * tt.n_trips
         for p in range(tt.n_patterns):
             for trip in range(tt.pat_trip_ptr[p], tt.pat_trip_ptr[p + 1]):

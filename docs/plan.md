@@ -215,6 +215,9 @@ comes later; the first prototype uses one district on real map tiles. See ADR 00
 - Next: play online with friends and tune (bot strength, `hunter_extra` per room size, round
   length); spectating for caught players beyond following the team; persistent player names
   and stats.
+- ✅ After the first online test: walking anywhere except through buildings (OpenStreetMap
+  footprints), screen-relative WASD with diagonals, and a map turned by right-drag
+  (`feat/free-walking`, ADR 0012).
 - Next: playtest and tune (bot Dodger, prices, radii, sight through buildings), and keep
   polishing the graphics. Multiplayer is further away.
 

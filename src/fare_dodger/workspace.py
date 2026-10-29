@@ -37,8 +37,8 @@ class Workspace:
         return self.root / "osm" / "cafes.json"
 
     @property
-    def parks_file(self) -> Path:
-        return self.root / "osm" / "parks.json"
+    def buildings_file(self) -> Path:
+        return self.root / "osm" / "buildings.json"
 
     def feed_dir(self) -> tuple[Path, str]:
         """Extracted feed directory and a fingerprint identifying the feed contents."""

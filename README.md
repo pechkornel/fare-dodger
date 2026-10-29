@@ -59,10 +59,12 @@ teams, CS-style.
   played on a different Budapest district (six on both banks of the Danube).
 - **Sides:** teams switch sides at halftime. After a tie, they switch every round until one
   team leads by two. **Esc** leaves to the menu.
-- **Controls:** jog along the real streets with **WASD** (no shortcuts through buildings;
-  parks and squares can be crossed freely).
-  The street data comes from OpenStreetMap and is downloaded once, about 11 MB; use
-  `--free-walk` to skip it. Stand at a stop and press **E** (or **1–6** to pick a
+- **Controls:** **WASD** move you up, left, down and right on the screen; hold two for a
+  diagonal. You can walk anywhere except through buildings: streets, rail lines, parks and
+  squares are all open, and you slide along walls. **Right-drag** turns the map, and **N** turns
+  it back to north. The streets (for the bots' routes), buildings and cafés come from
+  OpenStreetMap and are downloaded once, about 40 MB; use `--no-osm` to skip them. Stand at a
+  stop and press **E** (or **1–6** to pick a
   departure) to wait for a real tram, trolleybus, bus or metro. Press **E** again to get off at
   the next stop. Press **E** again (or click the switch, bottom right: blue on board, red getting
   off) to stay on. **Enter** starts the next round.
@@ -86,7 +88,8 @@ See [ADR 0005](docs/decisions/0005-live-prototype.md),
 [ADR 0007](docs/decisions/0007-street-walking-and-pace.md),
 [ADR 0008](docs/decisions/0008-toy-town-graphics.md),
 [ADR 0009](docs/decisions/0009-coffee.md),
-[ADR 0010](docs/decisions/0010-menu-minimap-parks.md) and
+[ADR 0010](docs/decisions/0010-menu-minimap-parks.md),
+[ADR 0012](docs/decisions/0012-free-walking-and-rotation.md) and
 [ADR 0011](docs/decisions/0011-online-and-deployment.md).
 
 Every command takes `-c configs/default.toml`, which documents every network and rule
@@ -110,8 +113,8 @@ docker compose --profile tunnel up -d   # also start cloudflared
 docker compose logs -f game
 ```
 
-- **First start:** the game downloads the BKK feed (62 MB), the OpenStreetMap streets, cafés
-  and parks (about 15 MB, from Overpass with two mirrors as fallback), and builds the six
+- **First start:** the game downloads the BKK feed (62 MB), the OpenStreetMap streets,
+  buildings and cafés (about 40 MB, from Overpass with two mirrors as fallback), and builds the six
   district networks into `./data`. This takes a few minutes; later starts take seconds. On
   every start it checks for a newer feed (a conditional request), and keeps the cached one if
   BKK can't be reached. The service day is picked automatically: the Tuesday, Wednesday or
@@ -138,7 +141,8 @@ docker compose logs -f game
   - the Python process peaked at **859 MiB** while building the networks;
   - the container's cgroup peaked at **1,215 MiB**, including reclaimable file cache from
     unpacking the 340 MB feed;
-  - serving, the process uses about **230 MiB**, plus little per room.
+  - serving, the process uses about **300 MiB** (the building footprints add about 75 MiB),
+    plus little per room.
 
   `GAME_MEMORY` (the Compose memory limit) defaults to 1,536 MiB; don't go below about
   1 GiB, or the first build can be killed.
