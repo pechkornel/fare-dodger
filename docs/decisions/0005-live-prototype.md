@@ -100,6 +100,8 @@ The owner saw route lines and vehicles wobble at the stops.
     straights keep their corners on the street.
 
 ## Addendum (2026-10-29): a fine you cannot pay no longer ends the round
+*The long hold described here was replaced the same day by the jail (ADR 0016).*
+
 With `start_money_ft` at 1,000 Ft and `fine_ft` at 1,000 Ft, buying a single ticket
 (450 Ft) left a Dodger unable to pay a fine. From then on, one ride without a ticket on an
 inspected trip lost the round. Inspectors are hidden, so that was pure luck, and it went

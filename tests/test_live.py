@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fare_dodger.config import LiveConfig, NetworkConfig
-from fare_dodger.live.bots import Agent, journey_state
+from fare_dodger.live.bots import Agent, Ping, journey_state
 from fare_dodger.live.game import Keys, LiveGame, Role, Status, world_view
 from fare_dodger.live.match import District, Match, match_winner, role_for
 from fare_dodger.live.server import create_app
@@ -348,30 +348,53 @@ def test_no_ticket_means_a_fine_and_being_held(world: World) -> None:
     assert dodger.pos != central  # free to go
 
 
-def test_cannot_pay_the_fine_means_a_longer_hold_not_game_over(world: World) -> None:
+def test_cannot_pay_the_fine_means_jail_not_game_over(world: World) -> None:
     game = solo_game(
         world,
         "West",
         inspected_share=1.0,
         start_money_ft=300,
         fine_ft=1000,
-        fine_hold_s=60,
-        unpaid_hold_s=180,
+        jail_s=30.0,
+        time_scale=6.0,
     )
     board_first_departure(game)
     assert game.status is Status.RUNNING
-    assert any("can't pay it all" in e.text for e in game.drain_events())
-    game.step(120)  # put off at Central at 08:02
-    held_until = game.dodger.held_until
-    assert held_until is not None and held_until - game.t > 60  # longer than a paid fine
-    assert game.snapshot()["fine_short"] is True
-    assert game.pings and game.pings[-1].node == node(world, "Central")  # reported
-    game.step(120)
-    assert game.dodger.held_until is not None  # still held after the usual minute
-    game.step(61)
+    assert any("jail" in e.text for e in game.drain_events())
+    game.step(120)  # put off at Central at 08:02, and taken to the jail
+    jail, name = world.jail_spot()  # no police data here: a post at a central station
+    dodger = game.dodger
+    assert dodger.jailed and dodger.pos == jail and name.startswith("the police post at")
+    held_until = dodger.held_until
+    assert held_until is not None and 0 < held_until - game.t <= 30 * 6  # 30 real seconds
+    view = game.snapshot()
+    assert view["jailed"] and view["jail"]["name"] == name and view["jail"]["busy"]
+    ping = game.pings[-1]  # the Bounty Hunters know where, and until when
+    assert ping.pos == jail and ping.until == held_until
+    game.keys = Keys(up=True)
+    game.step(held_until - game.t - 1)
+    assert game.dodger.pos == jail  # can't walk out early
+    game.step(2)
     dodger = game.dodger  # re-read: mypy keeps the narrowing from before step()
-    assert dodger.held_until is None and game.status is Status.RUNNING
-    assert (dodger.money, dodger.fines) == (0, 1)  # paid everything they had
+    assert dodger.held_until is None and not dodger.jailed and game.status is Status.RUNNING
+    assert (dodger.money, dodger.fines) == (0, 1)  # they kept everything they had
+    game.step(5)
+    assert dodger.pos != jail  # out and running
+
+
+def test_bot_hunters_walk_from_the_station_to_the_jail_door(world: World) -> None:
+    game = solo_game(world, "West")
+    station = node(world, "Central")
+    door = (world.node_xy[station][0] + 120.0, world.node_xy[station][1])  # a street away
+    agent = Agent(station, world.node_xy[station], station, needs_replan=False, idle_until=1e9)
+    game.hunters.agents = [agent]
+    game.hunters.last_pings = [Ping(int(game.t), door, station, 0, until=game.t + 60)]
+    game.hunters.advance(game.t + 20, 20, [])
+    assert distance(agent.pos, door) < 120 - 20  # on the way to the door
+    walked = agent.pos
+    game.hunters.advance(game.t + 61, 1, [])  # the Dodger is out: back to the network
+    assert agent.returning_to == station
+    assert distance(agent.pos, world.node_xy[station]) < distance(walked, world.node_xy[station])
 
 
 def test_sides_switch_at_halftime_and_every_overtime_round() -> None:

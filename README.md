@@ -81,7 +81,8 @@ teams, CS-style.
   - Ticket inspectors ride about 35% of the trips, and you only find out once you are aboard.
   - Without a ticket, you are put off at the next stop and held while the fine is written,
     and the Bounty Hunters are told where you are. If you can't pay it all, they take what
-    you have and hold you three times as long.
+    you have and you go to jail: the district's 🚔 police station, for 30 seconds. The
+    Bounty Hunters are told, so it's a race: run when the door opens.
   - Three Bounty Hunters learn your position every 3 timetable minutes, chase you on sight,
     and catch you when you are both on foot (waiting at a stop counts), or when they ride
     the same vehicle. Staying aboard is safe.

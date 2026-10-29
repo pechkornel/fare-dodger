@@ -295,6 +295,24 @@ function drawStatic(w) {
 }
 
 let cafeMarkers = [];
+let jailMarker = null;
+
+// The jail on the flat map (the 3D town draws its own cell): a police badge that flashes
+// while someone is locked in.
+function renderJail(jail) {
+  if (!jail) return;
+  if (!jailMarker) {
+    const el = document.createElement("div");
+    el.className = "entity";
+    el.innerHTML = '<div class="jail-sign"><span class="bars">🚔</span>BÖRTÖN</div>';
+    jailMarker = new maplibregl.Marker({ element: el }).setLngLat(lngLat(jail.pos)).addTo(map);
+  }
+  jailMarker.setLngLat(lngLat(jail.pos));
+  const sign = jailMarker.getElement().firstChild;
+  sign.title = `Jail: ${jail.name}`;
+  sign.classList.toggle("busy", jail.busy);
+}
+
 const parcels = { markers: [], goal: null };
 // Package destinations: an icon per kind of landmark (a flag for a plain street spot).
 const LANDMARK_ICONS = {
@@ -362,6 +380,7 @@ function clearDynamic() {
   for (const key of ["player", "dodger"]) {
     if (markers[key]) { markers[key].remove(); markers[key] = null; }
   }
+  if (jailMarker) { jailMarker.remove(); jailMarker = null; }
   last.money = last.tickets = null;
   for (const m of parcels.markers) m.remove();
   parcels.markers = [];
@@ -443,6 +462,7 @@ function render(s) {
   drawMinimap(s);
   renderPingArrow(s);
   renderParcels(s);
+  renderJail(s.jail);
   cam.target = s.player.pos;
   if (match.round_over && shownRound !== match.round) showResult(s, match);
   if (match.round_over && s.room && s.room.loading) {
@@ -595,14 +615,15 @@ function renderHud(s) {
     status = `Riding ${pill(r.mode, r.route)} → ${esc(r.headsign)}<br>` +
       `<span class="muted">Next: ${esc(r.next_stop)}${ticket}` +
       (r.alight_at ? ` · off at ${esc(r.alight_at)}` : " · E to get off") + "</span>";
+  } else if (s.held_s !== null && s.jailed) {
+    held = true;
+    status = `🚔 In jail at ${esc(s.jail.name)}… <b>${mmss(s.held_s / world.time_scale)}</b><br>` +
+      '<span class="muted">The Bounty Hunters know you\'re here. Run when the door opens!</span>';
   } else if (s.held_s !== null) {
     held = true;
-    const fine = s.fine_short
-      ? "You can't pay it all: they take what you have, and it takes longer."
-      : `${world.fine_ft} Ft.`;
     status = `📝 The inspectors are writing your fine… ` +
       `<b>${mmss(s.held_s / world.time_scale)}</b><br>` +
-      `<span class="muted">${fine} The Bounty Hunters know where you are!</span>`;
+      `<span class="muted">${world.fine_ft} Ft. The Bounty Hunters know where you are!</span>`;
   } else if (coffee.brewing_s != null) {
     status = `☕ Making your coffee… <b>${mmss(coffee.brewing_s / world.time_scale)}</b><br>` +
       '<span class="muted">Stand still. Keep an eye out for Bounty Hunters!</span>';
@@ -959,6 +980,7 @@ function drawMinimap(s) {
   if (mini.district !== district) minimapBase();
   const c = mini.ctx;
   c.drawImage(mini.base, 0, 0);
+  if (s.jail) miniDot(c, s.jail.pos, s.jail.busy ? "#e03131" : "#1971c2", 4.5, "#fff");
   if (s.role === "hunter") {
     for (const ping of s.pings || []) {
       // Where each Dodger was last reported: a circle that fades and grows with its age.

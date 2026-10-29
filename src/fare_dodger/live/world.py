@@ -106,6 +106,9 @@ class World:
         self.cafes: list[Cafe] = []
         #: Sights that packages are delivered to (see :mod:`fare_dodger.live.landmarks`).
         self.landmarks: list[Landmark] = []
+        #: The police station where Dodgers who cannot pay a fine are held (see
+        #: :meth:`jail_spot` for districts without one).
+        self.jail: Landmark | None = None
         #: Footprints that block walking (see :mod:`fare_dodger.live.buildings`).
         self.buildings: Buildings | None = None
         #: Water that blocks walking, bridges excepted (see :mod:`fare_dodger.live.water`).
@@ -198,6 +201,16 @@ class World:
                 continue
             return p
         return None
+
+    def jail_spot(self) -> tuple[Point, str]:
+        """Where the jail is, and its name: the district's police station, or else (no
+        police data yet) by the station nearest the middle of the network."""
+        if self.jail is not None:
+            return self.jail.pos, self.jail.name
+        xy = self.node_xy
+        middle = (sum(p[0] for p in xy) / len(xy), sum(p[1] for p in xy) / len(xy))
+        node = min(range(len(xy)), key=lambda n: (distance(xy[n], middle), n))
+        return self.stop_xy[node], f"the police post at {self.tt.node_name[node]}"
 
     def stop_distance(self, p: Point, node: int) -> float:
         """How far ``p`` is from station ``node``: its centre, where it meets the street, or

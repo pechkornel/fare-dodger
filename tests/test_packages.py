@@ -4,7 +4,14 @@ import pytest
 
 from fare_dodger.config import Area, LiveConfig, NetworkConfig
 from fare_dodger.live.game import LiveGame, Seat, Status
-from fare_dodger.live.landmarks import Landmark, landmark_kind, parse_landmarks, place_landmarks
+from fare_dodger.live.landmarks import (
+    Landmark,
+    install_landmarks,
+    landmark_kind,
+    parse_landmarks,
+    pick_jail,
+    place_landmarks,
+)
 from fare_dodger.live.world import World, distance
 from fare_dodger.network.timetable import Timetable
 from fare_dodger.routing.raptor import reachable
@@ -110,6 +117,31 @@ def test_landmark_kinds() -> None:
     assert landmark_kind({"historic": "memorial", "memorial": "stolperstein"}) is None
     assert landmark_kind({"historic": "tomb"}) is None
     assert landmark_kind({"tourism": "gallery"}) is None
+    assert landmark_kind({"amenity": "police"}) == "police"  # the jail, not a destination
+
+
+def test_the_jail_is_the_central_police_station_near_transport(
+    timetable: Timetable, fixture_network_config: NetworkConfig
+) -> None:
+    world = World(timetable, fixture_network_config.area)
+    xy = world.node_xy
+    middle = (sum(p[0] for p in xy) / len(xy), sum(p[1] for p in xy) / len(xy))
+    centre = min(range(len(xy)), key=lambda n: distance(xy[n], middle))
+    near = Landmark("Central police", "police", (xy[centre][0] + 50, xy[centre][1]))
+    far = Landmark("Lonely police", "police", (middle[0] + 5000, middle[1]))  # no transport
+    statue = Landmark("Hero", "statue", xy[0])
+    assert pick_jail([far], world) is None
+    assert pick_jail([far, near], world) == near
+    world.landmarks = [statue]
+    assert world.jail_spot()[1].startswith("the police post at")  # no police data yet
+    world.jail = near
+    assert world.jail_spot() == (near.pos, "Central police")
+    # Installing a download: police stations become the jail, never a package destination.
+    raw = [(m.name, m.kind, *world.proj.to_latlon(m.pos)) for m in (statue, near)]
+    fresh = World(timetable, fixture_network_config.area)
+    install_landmarks(raw, fresh)
+    assert [m.name for m in fresh.landmarks] == ["Hero"]
+    assert fresh.jail is not None and fresh.jail.name == "Central police"
 
 
 def test_parse_and_place_landmarks(

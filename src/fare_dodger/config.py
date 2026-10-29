@@ -239,10 +239,11 @@ class LiveConfig(_Frozen):
     inspected_share: float = Field(default=0.35, ge=0, le=1)
     #: Caught without a ticket: put off at the next stop and held there ``fine_hold_s``
     #: (timetable seconds) while the fine is processed, then pay ``fine_ft``. A Dodger who
-    #: cannot pay it all pays what they have and is held ``unpaid_hold_s`` instead.
+    #: cannot pay it all pays what they have and is taken to the district's jail instead,
+    #: held there ``jail_s`` *real* seconds, with the Bounty Hunters told where it is.
     fine_ft: int = Field(default=1000, ge=0)
     fine_hold_s: int = Field(default=60, ge=0)
-    unpaid_hold_s: int = Field(default=180, ge=0)
+    jail_s: float = Field(default=30.0, ge=0)
     #: The inspectors report a fined Dodger's position to the Bounty Hunters.
     fine_alerts_hunters: bool = True
     #: Packages (the Dodgers only): ``packages_waiting`` wait around the district, each going
