@@ -9,7 +9,8 @@ and ask to get off at the next stop (or the current one, if the vehicle is stand
 Fares (the Dodger only; Bounty Hunters ride free): a single ticket bought at any stop is used
 on the next boarding. Ticket inspectors ride a hidden share of the trips. Caught without a
 ticket, the Dodger is put off at the next stop and held there while the fine is processed
-(and reported to the Bounty Hunters), then pays; a Dodger who cannot pay loses.
+(and reported to the Bounty Hunters), then pays. A Dodger who cannot pay it all pays what
+they have and is held longer: bad luck with the inspectors never ends a round on its own.
 
 The Bounty Hunters win when one of them rides the same trip as the Dodger, or when both are
 on foot (waiting at a stop and being held count as on foot) within ``catch_radius_m``. They
@@ -174,11 +175,9 @@ class Runner:
     player: str | None = None
     bot: BotDodger | None = None
     caught: bool = False
-    #: How they were caught: by whom (a human's id; ``None`` for a bot), on which route, or
-    #: by the ticket inspectors.
+    #: How they were caught: by whom (a human's id; ``None`` for a bot), and on which route.
     catcher: str | None = None
     route: str | None = None
-    by_inspectors: bool = False
     package: Package | None = None
     deliveries: int = 0
 
@@ -767,20 +766,22 @@ class LiveGame:
         if ride.ticket:
             self._tell(d, "inspection", "Ticket inspection! Your ticket is valid. Phew.")
             return
-        runner = self._runner_of(d)
-        if d.money < self.cfg.fine_ft and runner is not None:
-            self._catch(runner, inspectors=True)
-            return
         ride.fined = True
         ride.alight_pos = dep.pos + 1
         name = self.world.tt.node_name[self.world.stops(ride.trip)[ride.alight_pos]]
-        self._tell(d, "inspection", f"Ticket inspection! No ticket: you're off at {name}.")
+        short = "" if d.money >= self.cfg.fine_ft else " You can't pay it all: a long wait."
+        self._tell(d, "inspection", f"Ticket inspection! No ticket: you're off at {name}.{short}")
 
     def _pay_fine(self, d: Traveller) -> None:
+        """Pay the fine, or as much of it as ``d`` has."""
         d.held_until = None
-        d.money -= self.cfg.fine_ft
+        paid = min(d.money, self.cfg.fine_ft)
+        d.money -= paid
         d.fines += 1
-        self._tell(d, "fine", f"You paid a {self.cfg.fine_ft} Ft fine and are free to go.")
+        if paid == self.cfg.fine_ft:
+            self._tell(d, "fine", f"You paid a {paid} Ft fine and are free to go.")
+        else:
+            self._tell(d, "fine", f"You paid all you had ({paid} Ft) and are free to go.")
 
     def _ride(self, who: Traveller, ride: Ride) -> None:
         world = self.world
@@ -795,7 +796,9 @@ class LiveGame:
             who.ride = None
             name = world.tt.node_name[node]
             if ride.fined:
-                who.held_until = self.t + self.cfg.fine_hold_s
+                cfg = self.cfg
+                hold = cfg.fine_hold_s if who.money >= cfg.fine_ft else cfg.unpaid_hold_s
+                who.held_until = self.t + hold
                 self._tell(who, "fine", f"Held at {name} while the fine is written.")
                 runner = self._runner_of(who)
                 if self.cfg.fine_alerts_hunters and runner is not None:
@@ -884,17 +887,11 @@ class LiveGame:
                 break
 
     def _catch(
-        self,
-        runner: Runner,
-        *,
-        catcher: str | None = None,
-        route: str | None = None,
-        inspectors: bool = False,
+        self, runner: Runner, *, catcher: str | None = None, route: str | None = None
     ) -> None:
         """``runner`` is out: caught by ``catcher`` (a human; ``None`` for a bot), on
-        ``route`` (same vehicle), or by the ticket inspectors. Their package is lost."""
+        ``route`` if on the same vehicle. Their package is lost."""
         runner.caught, runner.catcher, runner.route = True, catcher, route
-        runner.by_inspectors = inspectors
         runner.traveller.waiting_for = None
         runner.package = None
         for pid, human in self.humans.items():
@@ -914,8 +911,6 @@ class LiveGame:
 
     def _runner_line(self, runner: Runner) -> str:
         """How a caught Dodger hears about it."""
-        if runner.by_inspectors:
-            return f"Ticket inspection! You can't pay the {self.cfg.fine_ft} Ft fine."
         if runner.route:
             return f"A Bounty Hunter was riding the {runner.route} with you."
         return "A Bounty Hunter caught you."
@@ -923,8 +918,6 @@ class LiveGame:
     def _hunter_line(self, runner: Runner, pid: str) -> str:
         """How a Bounty Hunter hears about a catch."""
         called = self._called(runner)
-        if runner.by_inspectors:
-            return f"Ticket inspectors caught {called}, who couldn't pay the fine."
         who = "You" if runner.catcher == pid else "Your team"
         where = f" on the {runner.route}" if runner.route else ""
         return f"{who} caught {called}{where}!"
@@ -1092,6 +1085,8 @@ class LiveGame:
             "player": {"pos": self._latlon(p.pos), "state": state_name, "name": human.name},
             "wallet": {"money": p.money, "tickets": p.tickets} if p.pays_fares else None,
             "held_s": round(p.held_until - t) if p.held_until is not None else None,
+            # Held for a fine you can't pay in full (a longer wait).
+            "fine_short": p.held_until is not None and p.money < self.cfg.fine_ft,
             "coffee": {
                 "cafe": (
                     self.world.cafes[cafe_here].name

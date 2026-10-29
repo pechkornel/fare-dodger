@@ -24,6 +24,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   rides away. Standing at a package shows where it goes before you take it.
   `package_max_m` is now 2,000 m. Landmarks download in the background; until a district has
   them, its packages go to street spots. ADR 0013 addendum.
+- Live game: a Dodger who can't pay a fine no longer loses the round. They pay what they
+  have and are held for `unpaid_hold_s` (180 timetable seconds, three times the usual
+  `fine_hold_s`) at a spot reported to the Bounty Hunters. Before, buying a ticket could
+  leave you unable to afford a fine, and one ride without a ticket on an inspected trip then
+  lost the round. That decided about 1 bot round in 5. ADR 0005 addendum.
 
 ### Added
 - Live game: the whole city. There are 21 districts: the six inner ones and 15 more around
