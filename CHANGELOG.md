@@ -7,6 +7,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Districts can set their own live rules in `configs/live.toml` (`live = { hunter_extra = 4 }`).
+- `fare-dodger districts`: writes `docs/districts.md` with an SVG map of every district and its
+  balance results. `fare-dodger lengths`: round and match lengths from a spree, with simulated
+  matches of each length.
 - `fare-dodger balance`: balance sprees. Every rule variant in `configs/balance.toml` (one
   rule at a time, or named combinations) plays the same bot-only rounds in parallel, on four
   districts at the live random start times. They're ranked by how close the bot Dodger's

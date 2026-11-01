@@ -152,3 +152,46 @@ def test_wilson_interval() -> None:
     lo, hi = bal.wilson(45, 100)
     assert lo == pytest.approx(0.356, abs=1e-3) and hi == pytest.approx(0.548, abs=1e-3)
     assert all(math.isnan(x) for x in bal.wilson(0, 0))
+
+
+def test_a_grid_tries_every_combination(tmp_path: Path) -> None:
+    path = write(tmp_path, "[grid]\nduration_minutes = [25, 45]\nhunter_extra = [2, 3, 4]")
+    variants = bal.read_variants(path, LiveConfig())
+    assert len(variants) == 1 + 6
+    assert variants[1].name == "duration_minutes=25 hunter_extra=2"
+    assert variants[-1].overrides == {"duration_minutes": 45, "hunter_extra": 4}
+
+
+def test_matches_follow_the_live_rules() -> None:
+    # Evenly matched teams: about half each; an odd 1v1 match never ties.
+    even = bal.simulate_matches(5, 0.45, 0.0, [4.0], n=4000)
+    assert 0.45 < even.better_wins < 0.55 and even.overtime == 0
+    assert 3 <= even.rounds <= 5 and even.minutes == pytest.approx(4.0 * even.rounds)
+    # An even one can, and a longer match picks the better team more often.
+    six = bal.simulate_matches(6, 0.45, 0.15, [4.0], n=4000)
+    three = bal.simulate_matches(3, 0.45, 0.15, [4.0], n=4000)
+    assert six.overtime > 0 and six.rounds >= 6 * (1 - six.overtime) * 0.6
+    assert six.better_wins > three.better_wins > 0.5
+    assert six.p90_minutes >= six.minutes
+    # A team that always wins its rounds takes best of 3 in two.
+    sure = bal.simulate_matches(3, 0.5, 0.5, [1.0], n=200)
+    assert sure.better_wins == 1 and sure.rounds == 2
+
+
+def test_round_minutes_count_real_time() -> None:
+    cfg = LiveConfig(duration_minutes=36, time_scale=9.0)
+    caught = outcome("v", False)  # caught at 10 timetable minutes
+    free = outcome("v", True)
+    got = bal.round_minutes([caught, free, outcome("v", True, dodger="still")], cfg)
+    pause = bal.ROUND_OVERHEAD_S / 60
+    assert got == pytest.approx([10 / 9 + pause, 4 + pause])
+
+
+def test_the_lengths_report_simulates_matches_for_balanced_variants() -> None:
+    variants = [bal.Variant("baseline"), bal.Variant("easy", {"duration_minutes": 20})]
+    out = [outcome("baseline", i < 9) for i in range(20)]
+    out += [outcome("easy", i < 18) for i in range(20)]
+    text = bal.lengths_report(variants, LiveConfig(), out, [3, 6], skill=0.1, n=500)
+    assert "| baseline | 35 | 45% |" in text and "| easy | 20 | 90% |" in text
+    assert "| baseline | 3 |" in text and "| baseline | 6 |" in text
+    assert "| easy | 3 |" not in text  # not balanced

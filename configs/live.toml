@@ -83,7 +83,9 @@ glyphs_url = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf"
 
 # Districts, one per round in a shuffled order: a polygon (vertices) or a circle (center and
 # radius_m). Water is a wall, so where a district spans the Danube you cross it on a bridge or
-# a vehicle. Only the district being played (and the next one) is loaded.
+# a vehicle. Only the district being played (and the next one) is loaded. A district can set
+# its own live settings: `live = { hunter_extra = 4 }` (picked by balance sprees, ADR 0019).
+# docs/districts.md shows them all: `uv run fare-dodger districts`.
 [[district]]
 name = "Inner Pest"
 vertices = [

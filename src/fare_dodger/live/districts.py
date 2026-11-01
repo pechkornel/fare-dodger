@@ -15,7 +15,8 @@ import threading
 import unicodedata
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from fare_dodger.config import NetworkConfig
 from fare_dodger.live.world import World
@@ -35,6 +36,8 @@ class DistrictSpec:
 
     name: str
     net: NetworkConfig
+    #: Live settings of this district's rounds (``[[district]]``'s ``live`` table).
+    rules: dict[str, Any] = field(default_factory=dict)
 
     @property
     def slug(self) -> str:

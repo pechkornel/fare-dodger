@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,6 +16,7 @@ from fare_dodger.live.match import District, Match, Team, match_winner, role_for
 from fare_dodger.live.server import Limits, create_app
 from fare_dodger.live.world import World, distance
 from fare_dodger.network.timetable import Timetable
+from fare_dodger.workspace import district_rules, live_config
 
 
 @pytest.fixture(scope="module")
@@ -345,9 +347,40 @@ def test_bots_ping_their_team(world: World) -> None:
 def test_rounds_start_at_different_times_of_day(world: World) -> None:
     cfg = LiveConfig(start_times=("01:00", "13:00"), start_jitter_minutes=10)
     match = Match([District("X", world)], cfg, seed=3, begin=False)
-    starts = {match._round_config().start_seconds for _ in range(40)}
+    starts = {match._round_config(world).start_seconds for _ in range(40)}
     assert {s // 3600 for s in starts} == {1, 13}
     assert all(s % 3600 <= 10 * 60 for s in starts) and len(starts) > 2
-    assert Match([District("X", world)], LiveConfig(), seed=3, begin=False)._round_config() == (
-        LiveConfig()
-    )  # without start_times, always start_time
+    plain = Match([District("X", world)], LiveConfig(), seed=3, begin=False)
+    assert plain._round_config(world) == LiveConfig()  # without start_times, always start_time
+
+
+def test_a_district_can_have_its_own_hunters(tmp_path: Path, world: World) -> None:
+    toml = tmp_path / "live.toml"
+    toml.write_text(
+        """
+[live]
+hunter_extra = 3
+[[district]]
+name = "Small"
+center = [47.5, 19.05]
+radius_m = 1500
+[[district]]
+name = "Big"
+center = [47.5, 19.05]
+radius_m = 2500
+live = { hunter_extra = 5 }
+""",
+        encoding="utf-8",
+    )
+    cfg = live_config(toml)
+    assert district_rules(toml, cfg) == [{}, {"hunter_extra": 5}]
+    big = World(world.tt, world.area)
+    big.rules = {"hunter_extra": 5}
+    match = Match([District("Big", big)], cfg, seed=1, begin=False)
+    assert match._round_config(big).hunter_extra == 5
+    assert match._round_config(world).hunter_extra == 3
+    assert match._new_game().cfg.hunter_extra == 5
+    typo = '[[district]]\nname = "Typo"\ncenter = [47.5, 19.05]\nradius_m = 900\n'
+    toml.write_text(toml.read_text(encoding="utf-8") + typo + "live = { hunter_extar = 1 }\n")
+    with pytest.raises(ValueError, match="hunter_extar"):
+        district_rules(toml, cfg)

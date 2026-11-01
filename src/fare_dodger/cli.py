@@ -36,6 +36,12 @@ from fare_dodger.live.buildings import (
     read_buildings,
 )
 from fare_dodger.live.cafes import CAFES_VERSION, download_cafes, pick_cafes, read_cafes
+from fare_dodger.live.district_map import (
+    DistrictPage,
+    district_facts,
+    district_svg,
+    districts_markdown,
+)
 from fare_dodger.live.districts import DistrictPool, DistrictSpec
 from fare_dodger.live.landmarks import download_landmarks, install_landmarks, read_landmarks
 from fare_dodger.live.server import create_app
@@ -58,6 +64,7 @@ from fare_dodger.sim.runner import run_matchups
 from fare_dodger.timeutil import format_hm, parse_hms
 from fare_dodger.workspace import (
     Workspace,
+    district_rules,
     live_config,
     live_districts,
     network_config,
@@ -314,6 +321,16 @@ def sim(
 LIVE_CONFIG = Path("configs/live.toml")
 
 
+def district_specs(config: Path, cfg: LiveConfig) -> list[DistrictSpec]:
+    """The live config's districts, with their own settings."""
+    return [
+        DistrictSpec(name, net, rules)
+        for (name, net), rules in zip(
+            live_districts(config), district_rules(config, cfg), strict=True
+        )
+    ]
+
+
 def _load_osm_extra[T](
     what: str,
     path: Path,
@@ -432,6 +449,7 @@ class DistrictLoader:
         layers = self.layers(i)
         tt, _, _ = self.workspace.network(spec.net)
         world = World(tt, spec.net.area, self.workspace.vehicle_paths(spec.net, tt))
+        world.rules = dict(spec.rules)
         if layers.get("streets"):
             nodes, ways = layers["streets"]
             world.set_streets(
@@ -520,7 +538,7 @@ def play(
     if seed is not None:
         cfg = cfg.model_copy(update={"seed": seed})
     workspace = Workspace.at(data)
-    specs = [DistrictSpec(name, net) for name, net in live_districts(config)]
+    specs = district_specs(config, cfg)
     loader = DistrictLoader(workspace, specs, cfg, osm=osm)
     pool = DistrictPool([d.name for d in specs], loader, keep=keep, playable=loader.cached)
     # One district now (a downloaded one if there is any): this also builds or checks the feed.
@@ -563,7 +581,7 @@ _balance_worlds: dict[int, World] = {}
 
 def _balance_init(config: Path, data: Path | None, osm: bool) -> None:
     cfg = live_config(config)
-    specs = [DistrictSpec(name, net) for name, net in live_districts(config)]
+    specs = district_specs(config, cfg)
     _balance_loader[:] = [DistrictLoader(Workspace.at(data), specs, cfg, osm=osm)]
 
 
@@ -617,7 +635,7 @@ def balance(
     rounds for each, ranked by how close the bot Dodger's escape rate is to the target.
     Writes summary.md and rounds.csv."""
     cfg = live_config(config)
-    specs = [DistrictSpec(name, net) for name, net in live_districts(config)]
+    specs = district_specs(config, cfg)
     names = [s.name for s in specs]
     chosen = [_district_index(names, q) for q in (district or BALANCE_DISTRICTS)]
     found = bal.read_variants(variants, cfg)
@@ -665,3 +683,83 @@ def balance(
     bal.write_outcomes(out / "rounds.csv", outcomes)
     typer.echo(text)
     typer.echo(f"-> {out / 'summary.md'}, {out / 'rounds.csv'}")
+
+
+@app.command()
+def districts(
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", exists=True, dir_okay=False, help="Live TOML config"),
+    ] = LIVE_CONFIG,
+    data: DataDirOpt = None,
+    balance: Annotated[
+        list[Path] | None,
+        typer.Option(exists=True, dir_okay=False, help="A spree's rounds.csv (repeatable)"),
+    ] = None,
+    title: Annotated[
+        list[str] | None, typer.Option(help="A title for each --balance file, in order")
+    ] = None,
+    out: Annotated[Path, typer.Option(help="Markdown file to write")] = Path("docs/districts.md"),
+) -> None:
+    """Write the district list with a map picture of each (docs/districts.md and
+    docs/districts/*.svg) and their balance results from sprees' rounds.csv files."""
+    cfg = live_config(config)
+    specs = district_specs(config, cfg)
+    loader = DistrictLoader(Workspace.at(data), specs, cfg, osm=True)
+    pictures = out.parent / out.stem
+    pictures.mkdir(parents=True, exist_ok=True)
+    pages = []
+    for i, spec in enumerate(specs):
+        world = loader(i)
+        svg = pictures / f"{spec.slug}.svg"
+        svg.write_text(district_svg(world), encoding="utf-8", newline="\n")
+        pages.append(
+            DistrictPage(
+                i,
+                spec.name,
+                f"{pictures.name}/{svg.name}",
+                district_facts(world),
+                int(spec.rules.get("hunter_extra", cfg.hunter_extra)),
+                "hunter_extra" in spec.rules,
+            )
+        )
+    files = balance or []
+    titles = [*(title or [])][: len(files)] + [str(p) for p in files[len(title or []) :]]
+    runs = [(t, bal.read_outcomes(p)) for t, p in zip(titles, files, strict=True)]
+    text = districts_markdown(pages, runs, cfg.hunter_extra)
+    out.write_text(text, encoding="utf-8", newline="\n")
+    typer.echo(f"{len(pages)} districts -> {out}, {pictures}/")
+
+
+@app.command()
+def lengths(
+    rounds_csv: Annotated[
+        Path, typer.Argument(exists=True, dir_okay=False, help="A spree's rounds.csv")
+    ],
+    variants: Annotated[
+        Path,
+        typer.Option("--variants", "-v", exists=True, dir_okay=False, help="Its variants TOML"),
+    ] = BALANCE_VARIANTS,
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", exists=True, dir_okay=False, help="Live TOML config"),
+    ] = LIVE_CONFIG,
+    regulation: Annotated[
+        list[int] | None, typer.Option(help="Match lengths in rounds (repeatable)")
+    ] = None,
+    skill: Annotated[
+        float, typer.Option(help="How much better one team is (escape-rate points)")
+    ] = 0.15,
+    out: Annotated[Path | None, typer.Option(help="Also write the report here")] = None,
+) -> None:
+    """Round and match lengths from a spree: each variant's escape rate and real round time,
+    then simulated matches of each length for the balanced variants."""
+    cfg = live_config(config)
+    found = bal.read_variants(variants, cfg)
+    text = bal.lengths_report(
+        found, cfg, bal.read_outcomes(rounds_csv), regulation or [3, 4, 5, 6, 7, 8, 10], skill
+    )
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8", newline="\n")
+    typer.echo(text)
