@@ -989,9 +989,9 @@ class LiveGame:
             if pid == runner.player:
                 self._emit("end", self._runner_line(runner), [pid])
             elif human.role is Role.DODGER:
-                self._emit("ping", f"{runner.name} was caught!", [pid])
+                self._emit("caught", f"{runner.name} was caught!", [pid])
             else:
-                self._emit("end", self._hunter_line(runner, pid), [pid])
+                self._emit("caught", self._hunter_line(runner, pid), [pid])
         if not self.in_play():
             self.status = Status.CAUGHT
             self.caught_by = (
@@ -1193,6 +1193,12 @@ class LiveGame:
                 "name": jail_name,
                 "pos": self._latlon(jail_pos),
                 "busy": any(r.traveller.jailed for r in self.in_play()),
+                # Who is locked in, and when the door opens for them (game seconds).
+                "inmates": [
+                    {"name": r.name, "open_s": round(r.traveller.held_until - t)}
+                    for r in self.in_play()
+                    if r.traveller.jailed and r.traveller.held_until is not None
+                ],
             },
             "coffee": {
                 "cafe": (

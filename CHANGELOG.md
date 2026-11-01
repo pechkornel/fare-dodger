@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Live game: a catch flashes big on everyone's screen ("CAUGHT!" if it's you). In jail you
+  get a big countdown to the door opening, and everyone else sees who is locked in and for
+  how long.
 - Districts can set their own live rules in `configs/live.toml` (`live = { hunter_extra = 4 }`).
 - `fare-dodger districts`: writes `docs/districts.md` with an SVG map of every district and its
   balance results. `fare-dodger lengths`: round and match lengths from a spree, with simulated

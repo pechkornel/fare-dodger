@@ -374,6 +374,10 @@ def test_cannot_pay_the_fine_means_jail_not_game_over(world: World) -> None:
     assert held_until is not None and 0 < held_until - game.t <= 30 * 6  # 30 real seconds
     view = game.snapshot()
     assert view["jailed"] and view["jail"]["name"] == name and view["jail"]["busy"]
+    # Everyone sees who is locked in and when the door opens (for the big jail banner).
+    assert view["jail"]["inmates"] == [
+        {"name": game.runners[0].name, "open_s": round(held_until - game.t)}
+    ]
     ping = game.pings[-1]  # the Bounty Hunters know where, and until when
     assert ping.pos == jail and ping.until == held_until
     game.keys = Keys(up=True)
@@ -462,6 +466,8 @@ def test_human_hunter_catches_the_dodger_on_foot(world: World) -> None:
     game.step(30)
     assert game.status is Status.CAUGHT and game.player_won is True
     assert game.caught_by == "You caught the Dodger!"
+    # The catch is its own event, for the big "caught" flash.
+    assert ("caught", "You caught the Dodger!") in [(e.kind, e.text) for e in game.drain_events()]
 
 
 def test_dodger_is_hidden_from_hunters_when_far(world: World) -> None:
