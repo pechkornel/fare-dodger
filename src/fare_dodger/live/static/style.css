@@ -154,7 +154,7 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 .toast { background: #fff; border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
   padding: 8px 12px; border-radius: 16px; font-size: 14px; font-weight: 600;
   animation: pop 0.35s ease-out, fade 6s forwards; transform-origin: top right; }
-.toast.ping, .toast.end { background: #ffe3e3; }
+.toast.ping, .toast.end, .toast.caught { background: #ffe3e3; }
 .toast.board, .toast.alight { background: #d3f9d8; }
 .toast.ticket { background: #fff3bf; }
 .toast.coffee { background: #f1d3b3; }
@@ -173,6 +173,18 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
   padding: 70px 80px; text-align: center; animation: pop 0.35s ease-out; }
 #burst.bad #burst-text { background: var(--hunter); color: #fff; }
 #burst.good #burst-text { background: #8ce99a; }
+#burst.caught #burst-text { background: var(--hunter); color: #fff; font-size: 34px; }
+
+/* In jail: a big countdown for whoever is locked in, a line for everyone else */
+#jail-banner { position: absolute; top: 96px; left: 50%; transform: translateX(-50%);
+  z-index: 1400; pointer-events: none; text-align: center; padding: 8px 18px;
+  background: #fff; border: 3px solid var(--ink); border-radius: 14px;
+  box-shadow: 4px 4px 0 var(--ink); font-weight: 700; font-size: 16px; }
+#jail-banner[hidden] { display: none; }
+#jail-banner.me { background: var(--hunter); color: #fff; padding: 14px 34px; }
+#jail-banner .title { font-size: 34px; letter-spacing: 1px; }
+#jail-banner .clock { font-size: 56px; line-height: 1.05; font-variant-numeric: tabular-nums; }
+#jail-banner .where { font-size: 15px; font-weight: 600; }
 
 #help { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 1000;
   padding: 8px 16px; font-size: 14px; max-width: calc(100vw - 24px); text-align: center; }
@@ -345,4 +357,6 @@ body.in-menu #follow { display: none !important; }
   #minimap { width: 140px; height: 140px; top: auto; bottom: 96px; }
   #ride-toggle { min-width: 0; bottom: 12px; }
   #burst-text { font-size: 32px; padding: 50px 56px; }
+  #jail-banner .title { font-size: 24px; }
+  #jail-banner .clock { font-size: 40px; }
 }

@@ -458,7 +458,10 @@ function render(s) {
   for (const e of s.events) {
     toast(e.kind, e.text);
     if (e.kind === "inspection") burst(e.text.includes("valid") ? "good" : "bad");
+    else if (e.kind === "caught") burst("caught", `🚨 ${e.text}`, 2600);
+    else if (e.kind === "end" && s.player.state === "caught") burst("bad", "CAUGHT! 🚨", 2600);
   }
+  renderJailBanner(s);
   renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
   renderHunters(s.hunters, s.role);
   renderDodgers(s.dodgers, s.role);
@@ -714,6 +717,27 @@ function renderHud(s) {
     (rows.length ? rows.join("") : '<div class="muted">No departures soon.</div>');
 }
 
+// In jail: a big countdown if it's you, and who is locked in (and for how long) for the rest.
+function renderJailBanner(s) {
+  const el = $("jail-banner");
+  const running = s.status === "running";
+  if (running && s.jailed && s.held_s !== null) {
+    el.className = "me";
+    el.innerHTML = '<div class="title">🚔 IN JAIL</div>' +
+      `<div class="clock">${mmss(s.held_s / world.time_scale)}</div>` +
+      `<div class="where">${esc(s.jail.name)} · the Bounty Hunters know you're here. ` +
+      "Run when the door opens!</div>";
+    el.hidden = false;
+    return;
+  }
+  const inmates = running ? (s.jail.inmates || []) : [];
+  if (!inmates.length) { el.hidden = true; return; }
+  el.className = "";
+  el.innerHTML = inmates.map((m) => `🚔 ${esc(m.name)} is in jail at ${esc(s.jail.name)} · ` +
+    `door opens in <b>${mmss(m.open_s / world.time_scale)}</b>`).join("<br>");
+  el.hidden = false;
+}
+
 function toast(kind, text) {
   const el = document.createElement("div");
   el.className = `toast ${kind}`;
@@ -723,12 +747,12 @@ function toast(kind, text) {
   while ($("feed").children.length > 5) $("feed").lastChild.remove();
 }
 
-function burst(kind) {
-  $("burst-text").textContent = kind === "good" ? "Ticket OK! 🎫" : "KONTROLL! 🚨";
+function burst(kind, text = null, ms = 1600) {
+  $("burst-text").textContent = text ?? (kind === "good" ? "Ticket OK! 🎫" : "KONTROLL! 🚨");
   $("burst").className = kind;
   $("burst").hidden = false;
   clearTimeout(burstTimer);
-  burstTimer = setTimeout(() => { $("burst").hidden = true; }, 1600);
+  burstTimer = setTimeout(() => { $("burst").hidden = true; }, ms);
 }
 
 function showResult(s, m) {
