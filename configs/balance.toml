@@ -1,0 +1,35 @@
+# Rule variants for `fare-dodger balance` (see docs/decisions/0019-balance-sprees.md).
+#
+# `baseline` is configs/live.toml with the [base] overrides (none here). Every value under
+# [sweep] is a variant changing that one rule from the baseline; every [[variant]] is a named
+# combination. All variants play the same rounds, so they compare fairly.
+# After a rule change: run `uv run fare-dodger balance` and keep the best-scoring variant.
+
+[sweep]
+# How often the Bounty Hunters learn where the Dodger is (timetable s; 9 per real second).
+ping_every_s = [120, 150, 240, 300]
+# Bot Bounty Hunters added to the hunting side.
+hunter_extra = [2, 4]
+# How close a bot Bounty Hunter must be to chase the Dodger directly (m).
+sight_radius_m = [150.0, 300.0]
+# How close the two sides see each other (m), for humans and for the bot Dodger.
+see_radius_m = [150.0, 300.0]
+# How close catches on foot are (m).
+catch_radius_m = [15.0, 40.0]
+# Round length (timetable minutes).
+duration_minutes = [25, 45]
+# Share of rides with an inspector; fined Dodgers are held and reported.
+inspected_share = [0.2, 0.5]
+fine_hold_s = [45, 180]
+# How far apart the sides start (minutes of travel).
+min_start_distance_min = [5, 12]
+
+[[variant]]
+name = "fewer reports, more hunters"
+ping_every_s = 240
+hunter_extra = 4
+
+[[variant]]
+name = "short rounds, more reports"
+duration_minutes = 25
+ping_every_s = 150

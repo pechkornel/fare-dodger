@@ -487,6 +487,31 @@ def test_bot_dodger_travels_and_rounds_finish(world: World) -> None:
     assert Status.CAUGHT in outcomes
 
 
+def test_bot_dodger_knows_only_what_a_human_dodger_sees(world: World) -> None:
+    cfg = LiveConfig()
+    game = LiveGame(world, cfg, seed=2, role=Role.HUNTER)
+    bot, d = game.dodger_bot, game.dodger
+    assert bot is not None
+    game.player.pos = (d.pos[0] + 5000, d.pos[1])  # the human Bounty Hunter, out of sight
+    far = (d.pos[0] + 2 * cfg.see_radius_m, d.pos[1])
+    n = world.nearest_node(d.pos)
+    assert n is not None
+    game.hunters.agents = [Agent(n, far, n)]
+    _, flee = bot.control(game)
+    # Beyond sight: only a distance (the top bar), no position, nothing to flee from.
+    assert bot.seen == [] and bot.known() == [] and flee is None
+    assert bot.nearest_m == pytest.approx(2 * cfg.see_radius_m)
+    close = (d.pos[0] + 0.5 * cfg.see_radius_m, d.pos[1])
+    game.hunters.agents[0].pos = close
+    _, flee = bot.control(game)
+    assert [s.pos for s in bot.seen] == [close]
+    assert flee is not None and flee[0] < 0  # away, west
+    # Out of sight again, it remembers where it saw the Bounty Hunter for a while.
+    game.hunters.agents[0].pos = far
+    bot.control(game)
+    assert bot.seen == [] and [s.pos for s in bot.known()] == [close]
+
+
 def test_bot_hunters_never_outrun_their_legs(world: World) -> None:
     # The bug: a journey ending at its arrival second left the bot at its origin station, so
     # the next one started there: a jump across the district, or a sprint through houses.

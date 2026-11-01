@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import statistics
 import sys
@@ -13,6 +14,7 @@ import weakref
 import webbrowser
 from collections import Counter
 from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -25,6 +27,7 @@ from fare_dodger.bots import DODGER_BOTS, INSPECTOR_BOTS
 from fare_dodger.config import LiveConfig, NetworkConfig, RulesConfig
 from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.download import download_feed
+from fare_dodger.live import balance as bal
 from fare_dodger.live.admin import Admin
 from fare_dodger.live.buildings import (
     BUILDINGS_VERSION,
@@ -540,3 +543,125 @@ def play(
     if open_browser:
         webbrowser.open(url)
     uvicorn.run(app_, host=host, port=port, log_level="warning")
+
+
+BALANCE_VARIANTS = Path("configs/balance.toml")
+#: A spread of districts: the centre, Buda's hills, a river crossing and the outskirts.
+BALANCE_DISTRICTS = [
+    "Inner Pest",
+    "Buda: Castle & Gellért",
+    "Árpád híd: Óbuda & Angyalföld",
+    "Kispest & Kőbánya-Kispest",
+]
+#: Rounds per worker task.
+BALANCE_CHUNK = 10
+
+#: Each balance worker's district loader and the worlds it loaded.
+_balance_loader: list[DistrictLoader] = []
+_balance_worlds: dict[int, World] = {}
+
+
+def _balance_init(config: Path, data: Path | None, osm: bool) -> None:
+    cfg = live_config(config)
+    specs = [DistrictSpec(name, net) for name, net in live_districts(config)]
+    _balance_loader[:] = [DistrictLoader(Workspace.at(data), specs, cfg, osm=osm)]
+
+
+def _balance_world(i: int) -> World:
+    if i not in _balance_worlds:
+        _balance_worlds[i] = _balance_loader[0](i)
+    return _balance_worlds[i]
+
+
+def _balance_task(
+    cfg: LiveConfig, variants: list[bal.Variant], rounds: list[bal.Round]
+) -> list[bal.Outcome]:
+    return bal.play_batch(_balance_world, cfg, variants, rounds)
+
+
+def _district_index(names: list[str], query: str) -> int:
+    if query.isdigit() and int(query) < len(names):
+        return int(query)
+    hits = [i for i, n in enumerate(names) if query.casefold() in n.casefold()]
+    if len(hits) != 1:
+        raise typer.BadParameter(f"district {query!r} matches {[names[i] for i in hits]}")
+    return hits[0]
+
+
+@app.command()
+def balance(
+    variants: Annotated[
+        Path,
+        typer.Option("--variants", "-v", exists=True, dir_okay=False, help="Variants TOML"),
+    ] = BALANCE_VARIANTS,
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", exists=True, dir_okay=False, help="Live TOML config"),
+    ] = LIVE_CONFIG,
+    data: DataDirOpt = None,
+    district: Annotated[
+        list[str] | None,
+        typer.Option(help="District name (or part of it) or index; repeatable"),
+    ] = None,
+    rounds: Annotated[int, typer.Option(min=1, help="Rounds per district and variant")] = 100,
+    seed: Annotated[int, typer.Option(help="Base seed; round i uses seed + i")] = 1,
+    workers: Annotated[int, typer.Option(min=1, help="Worker processes [default: CPUs - 1]")] = max(
+        1, (os.cpu_count() or 2) - 1
+    ),
+    only: Annotated[
+        list[str] | None, typer.Option(help="Run only these variants (and the baseline)")
+    ] = None,
+    out: Annotated[Path, typer.Option(help="Output directory")] = Path("results/balance"),
+) -> None:
+    """Balance spree: bot-only rounds under every rule variant in the variants file, the same
+    rounds for each, ranked by how close the bot Dodger's escape rate is to the target.
+    Writes summary.md and rounds.csv."""
+    cfg = live_config(config)
+    specs = [DistrictSpec(name, net) for name, net in live_districts(config)]
+    names = [s.name for s in specs]
+    chosen = [_district_index(names, q) for q in (district or BALANCE_DISTRICTS)]
+    found = bal.read_variants(variants, cfg)
+    if only:
+        found = [v for v in found if v.name == "baseline" or v.name in only]
+    loader = DistrictLoader(Workspace.at(data), specs, cfg, osm=True)
+    for i in chosen:  # download and build once, here, before the workers read the caches
+        loader(i)
+    plan = bal.plan_rounds(cfg, chosen, rounds, seed)
+    tasks = [
+        ([v], plan[k : k + BALANCE_CHUNK])
+        for v in found
+        for k in range(0, len(plan), BALANCE_CHUNK)
+    ]
+    total = len(found) * len(plan)
+    typer.echo(
+        f"{len(found)} variants x {len(plan)} rounds ({len(chosen)} districts) x "
+        f"{len(bal.DODGERS)} Dodgers on {workers} workers",
+        err=True,
+    )
+    started = time.perf_counter()
+    outcomes: list[bal.Outcome] = []
+    with ProcessPoolExecutor(
+        workers, initializer=_balance_init, initargs=(config, data, True)
+    ) as pool:
+        futures = [pool.submit(_balance_task, cfg, vs, rs) for vs, rs in tasks]
+        for done, future in enumerate(as_completed(futures), 1):
+            outcomes += future.result()
+            if done % max(1, len(futures) // 20) == 0 or done == len(futures):
+                rate = len(outcomes) / len(bal.DODGERS) / (time.perf_counter() - started)
+                typer.echo(
+                    f"  {len(outcomes) // len(bal.DODGERS)}/{total} rounds ({rate:.1f}/s)", err=True
+                )
+    order = {v.name: k for k, v in enumerate(found)}
+    outcomes.sort(key=lambda o: (order[o.variant], o.dodger, o.district, o.seed))
+    summaries = bal.summarise(outcomes, found)
+    text = bal.report(summaries, found, {i: names[i] for i in chosen})
+    header = (
+        f"# Balance spree\n\n{len(plan)} rounds per variant on "
+        f"{', '.join(names[i] for i in chosen)}; seed {seed}; "
+        f"{time.perf_counter() - started:.0f}s.\n\n"
+    )
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "summary.md").write_text(header + text, encoding="utf-8")
+    bal.write_outcomes(out / "rounds.csv", outcomes)
+    typer.echo(text)
+    typer.echo(f"-> {out / 'summary.md'}, {out / 'rounds.csv'}")

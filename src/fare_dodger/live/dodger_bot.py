@@ -2,17 +2,20 @@
 
 The bot drives the Dodger's :class:`~fare_dodger.live.game.Traveller` through the same
 mechanics as a human: it walks, waits at stops, boards, gets off, buys tickets or gambles,
-and is fined like anyone else. Like a human Dodger it sees every Bounty Hunter, and it uses
-that:
+and is fined like anyone else. It knows only what a human Dodger knows: the Bounty Hunters
+within ``see_radius_m`` (remembered for ``MEMORY_S``), the distance to the nearest one (the top
+bar), and where it was last reported. It uses that:
 
 * It plans RAPTOR journeys to a station reachable within ``PLAN_REACH_S`` that is far from
-  the Bounty Hunters and from its last reported position, skipping journeys that ride a trip a
-  Bounty Hunter is on or stop near a Bounty Hunter on foot.
+  the Bounty Hunters it remembers and from its last reported position, skipping journeys that
+  ride a trip it saw a Bounty Hunter on or stop near one it saw on foot.
 * At the destination it hides a little away from the station (the Bounty Hunters search
   stations) and dwells there before moving on.
 * A Bounty Hunter on foot within ``FLEE_M`` makes it give up waiting and walk away (along the
   streets, steering like a human), unless its vehicle is about to leave; it replans once the
   threat is gone.
+* When the top bar turns red (the nearest Bounty Hunter within ``DANGER_SIGHTS`` sight radii)
+  while it hides, it moves on at once.
 """
 
 from __future__ import annotations
@@ -57,6 +60,20 @@ STAY_IF_FARTHER_M = 60.0
 REPLAN_GAP_S = 5.0
 #: Chance of buying a ticket before a ride (if it has none and can afford one).
 TICKET_PROB = 0.5
+#: Bounty Hunters seen are remembered this long (timetable seconds), noted this often.
+MEMORY_S = 180.0
+MEMO_GAP_S = 5.0
+#: The top bar's red, in sight radii (as in the client): a hider moves on.
+DANGER_SIGHTS = 1.5
+
+
+@dataclass(frozen=True, slots=True)
+class Sighting:
+    """A Bounty Hunter seen at ``pos`` at ``time``, aboard ``trip`` if riding."""
+
+    pos: Point
+    trip: int | None
+    time: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +96,12 @@ class BotDodger:
         self.last_plan = -1e9
         #: Seen aboard since the current ride step began.
         self.riding = False
+        #: What it knows of the Bounty Hunters: those in sight now, recent sightings, and the
+        #: distance to the nearest one.
+        self.seen: list[Sighting] = []
+        self.memory: list[Sighting] = []
+        self.last_memo = -1e9
+        self.nearest_m = math.inf
 
     def control(self, game: LiveGame) -> tuple[Point | None, Point | None]:
         """Act for this substep; returns the point to walk towards or the direction to walk
@@ -87,8 +110,29 @@ class BotDodger:
         target = self._target(game)
         return target, self.flee_dir
 
+    def _sense(self, game: LiveGame) -> None:
+        """Look around: what a human Dodger sees of the Bounty Hunters."""
+        d, t = game.runners[self.runner].traveller, game.t
+        states = [s for s, _ in game.hunter_states()]
+        gaps = [distance(s.pos, d.pos) for s in states]
+        self.nearest_m = min(gaps, default=math.inf)
+        self.seen = [
+            Sighting(s.pos, s.trip, t)
+            for s, gap in zip(states, gaps, strict=True)
+            if gap <= self.cfg.see_radius_m
+        ]
+        self.memory = [m for m in self.memory if t - m.time <= MEMORY_S]
+        if self.seen and t - self.last_memo >= MEMO_GAP_S:
+            self.memory += self.seen
+            self.last_memo = t
+
+    def known(self) -> list[Sighting]:
+        """The Bounty Hunters in sight and the recently seen ones."""
+        return self.seen + self.memory
+
     def _target(self, game: LiveGame) -> Point | None:
         d, t = game.runners[self.runner].traveller, game.t
+        self._sense(game)
         if d.held_until is not None:
             self.steps, self.riding = [], False
             self.next_plan = d.held_until
@@ -108,6 +152,8 @@ class BotDodger:
         self.flee_dir = self._flee(game)
         if self.flee_dir is not None:
             return None
+        if not self.steps and self.nearest_m <= DANGER_SIGHTS * self.cfg.see_radius_m:
+            self.next_plan = min(self.next_plan, t)  # red on the top bar: stop hiding
         if not self.steps and t >= self.next_plan:
             self._plan(game)
         if not self.steps:
@@ -136,7 +182,7 @@ class BotDodger:
 
     def _board(self, game: LiveGame, leg: RideLeg) -> Point | None:
         d, t, world = game.runners[self.runner].traveller, game.t, self.world
-        if t > leg.dep or any(s.trip == leg.trip for s, _ in game.hunter_states()):
+        if t > leg.dep or any(s.trip == leg.trip for s in self.known()):
             self.steps = []  # missed it, or a Bounty Hunter is aboard
             self.next_plan = t
             d.waiting_for = None
@@ -162,7 +208,7 @@ class BotDodger:
     def _flee(self, game: LiveGame) -> Point | None:
         """The direction away from the closest Bounty Hunter on foot, if one is too close."""
         d, t = game.runners[self.runner].traveller, game.t
-        threats = [s.pos for s, _ in game.hunter_states() if s.trip is None]
+        threats = [s.pos for s in self.seen if s.trip is None]
         if not threats:
             return None
         near = min(threats, key=lambda p: distance(p, d.pos))
@@ -197,14 +243,14 @@ class BotDodger:
         candidates = [n for n in world.boarding_nodes if n in reached and n != origin]
         if not candidates:
             return
-        hunters = game.hunter_states()
-        on_foot = [s.pos for s, _ in hunters if s.trip is None]
-        hunter_trips = {s.trip for s, _ in hunters if s.trip is not None}
+        hunters = self.known()
+        on_foot = [s.pos for s in hunters if s.trip is None]
+        hunter_trips = {s.trip for s in hunters if s.trip is not None}
         own = [p for p in game.pings if p.runner == self.runner]
         ping = own[-1].pos if own else None
 
         def score(n: int) -> float:
-            near = min((distance(xy[n], s.pos) for s, _ in hunters), default=0.0)
+            near = min((distance(xy[n], s.pos) for s in hunters), default=0.0)
             away = distance(xy[n], ping) if ping is not None else 0.0
             return near + PING_WEIGHT * away + self.rng.uniform(0, JITTER_M)
 
