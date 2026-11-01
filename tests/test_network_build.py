@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import itertools
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 from fare_dodger.config import CircleArea, NetworkConfig
 from fare_dodger.gtfs.load import RawFeed, load_feed
 from fare_dodger.modes import Mode
-from fare_dodger.network.build import build_timetable, cache_key, load_or_build
+from fare_dodger.network.build import base_trip_id, build_timetable, cache_key, load_or_build
 from fare_dodger.network.graph import strongly_connected_components
 from fare_dodger.network.patterns import TripSequence, build_patterns, collapse_repeats
 from fare_dodger.network.timetable import Timetable
@@ -90,6 +92,40 @@ def test_area_clips_trips(fixture_feed: RawFeed) -> None:
     tt = build_timetable(fixture_feed, small)
     # North is 1.1 km out; Park is inside but its only bus is clipped to a single stop.
     assert sorted(tt.node_name) == ["Central", "Market"]
+
+
+def test_a_trip_that_leaves_the_area_and_comes_back_is_split(
+    fixture_feed: RawFeed, fixture_network_config: NetworkConfig
+) -> None:
+    # Bus 1 out to Far (outside the area) and back: Park, Ady (A), Far, East, Ady (A).
+    st = fixture_feed.stop_times
+    stops = ["PRK_1", "ADA_1", "FAR_1", "EST_2", "ADA_2"]
+    times = [8 * 3600 + 60 * m for m in (0, 4, 15, 26, 29)]
+    loop = pl.DataFrame(
+        {
+            "trip_id": ["LOOP"] * 5,
+            "stop_id": stops,
+            "stop_sequence": list(range(1, 6)),
+            "arrival": times,
+            "departure": times,
+        }
+    ).cast(st.schema)
+    trip = fixture_feed.trips.filter(pl.col("route_id") == "B1").head(1)
+    trip = trip.with_columns(pl.lit("LOOP").cast(trip.schema["trip_id"]).alias("trip_id"))
+    feed = replace(
+        fixture_feed,
+        trips=pl.concat([fixture_feed.trips, trip]),
+        stop_times=pl.concat([st, loop]).sort("trip_id", "stop_sequence"),
+    )
+    tt = build_timetable(feed, fixture_network_config)
+    parts = {
+        tt.trip_id[k]: [tt.node_name[n] for n in tt.pattern_stops(p)]
+        for p in range(tt.n_patterns)
+        for k in range(tt.pat_trip_ptr[p], tt.pat_trip_ptr[p + 1])
+        if base_trip_id(tt.trip_id[k]) == "LOOP"
+    }
+    assert parts == {"LOOP": ["Park", "Ady Endre utca"], "LOOP~2": ["East", "Ady Endre utca"]}
+    assert base_trip_id("T~x") == "T~x"
 
 
 def test_largest_component_drops_one_way_dead_ends(
