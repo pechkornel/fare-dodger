@@ -100,6 +100,20 @@ def live_districts(path: Path | None) -> list[tuple[str, NetworkConfig]]:
     ]
 
 
+def district_rules(path: Path | None, cfg: LiveConfig) -> list[dict[str, Any]]:
+    """Each district's own live rules, in the order of :func:`live_districts`: its ``live``
+    table (``live = { hunter_extra = 4 }``), checked on top of ``cfg``."""
+    tables = load_toml(path).get("district", []) if path is not None else []
+    out = []
+    for table in tables or [{}]:
+        rules = dict(table.get("live", {}))
+        if bad := set(rules) - set(LiveConfig.model_fields):
+            raise ValueError(f"district {table.get('name')!r}: not live settings: {sorted(bad)}")
+        LiveConfig.model_validate({**cfg.model_dump(), **rules})
+        out.append(rules)
+    return out
+
+
 def _district_area(table: dict[str, Any]) -> dict[str, Any]:
     if "vertices" in table:
         return {"kind": "polygon", "vertices": table["vertices"]}

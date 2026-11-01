@@ -14,6 +14,7 @@ the gap between day and night rounds, plus a penalty when standing still escapes
 from __future__ import annotations
 
 import csv
+import itertools
 import math
 import random
 import statistics
@@ -24,7 +25,8 @@ from pathlib import Path
 from typing import Any
 
 from fare_dodger.config import LiveConfig
-from fare_dodger.live.game import LiveGame, Seat, Status
+from fare_dodger.live.game import LiveGame, Role, Seat, Status
+from fare_dodger.live.match import match_winner, role_for
 from fare_dodger.live.world import World
 from fare_dodger.timeutil import format_hms, parse_hms
 
@@ -58,17 +60,20 @@ def _label(value: Any) -> str:
 def read_variants(path: Path, cfg: LiveConfig) -> list[Variant]:
     """The variants in a TOML file: ``baseline`` (the ``[base]`` overrides, or none), then one
     variant per value under ``[sweep]`` (each changing one rule from the baseline), then every
-    ``[[variant]]`` (a ``name`` and overrides on top of the baseline). Every variant is
-    checked against ``cfg`` so a typo fails before anything runs."""
+    ``[[variant]]`` (a ``name`` and overrides on top of the baseline), then every combination
+    of the values under ``[grid]``. Every variant is checked against ``cfg`` so a typo fails
+    before anything runs."""
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    unknown = set(data) - {"base", "sweep", "variant"}
+    unknown = set(data) - {"base", "sweep", "variant", "grid"}
     if unknown:
         raise ValueError(f"{path}: unknown tables {sorted(unknown)}")
+    for table in ("sweep", "grid"):
+        for key, values in data.get(table, {}).items():
+            if not isinstance(values, list):
+                raise ValueError(f"{path}: {table}.{key} must be a list of values")
     base: dict[str, Any] = data.get("base", {})
     variants = [Variant("baseline", dict(base))]
     for key, values in data.get("sweep", {}).items():
-        if not isinstance(values, list):
-            raise ValueError(f"{path}: sweep.{key} must be a list of values")
         variants += [Variant(f"{key}={_label(v)}", {**base, key: v}) for v in values]
     for spec in data.get("variant", []):
         entry = dict(spec)
@@ -76,6 +81,11 @@ def read_variants(path: Path, cfg: LiveConfig) -> list[Variant]:
         if not isinstance(name, str):
             raise ValueError(f"{path}: every [[variant]] needs a name")
         variants.append(Variant(name, {**base, **entry}))
+    grid: dict[str, list[Any]] = data.get("grid", {})
+    for combo in itertools.product(*grid.values()) if grid else ():
+        rules = dict(zip(grid, combo, strict=True))
+        name = " ".join(f"{k}={_label(v)}" for k, v in rules.items())
+        variants.append(Variant(name, {**base, **rules}))
     names = [v.name for v in variants]
     if len(set(names)) != len(names):
         raise ValueError(f"{path}: variant names repeat: {names}")
@@ -167,9 +177,11 @@ def play_batch(
     """Every variant and Dodger over ``rounds``; ``world`` loads a district."""
     out = []
     for v in variants:
-        vcfg = v.apply(cfg)
         for dodger in DODGERS:
-            out += [play_round(world(r.district), vcfg, v.name, dodger, r) for r in rounds]
+            for r in rounds:
+                w = world(r.district)
+                rules = Variant(v.name, {**w.rules, **v.overrides}).apply(cfg)
+                out.append(play_round(w, rules, v.name, dodger, r))
     return out
 
 
@@ -288,3 +300,161 @@ def write_outcomes(path: Path, outcomes: list[Outcome]) -> None:
         writer = csv.DictWriter(f, fieldnames=[f.name for f in fields(Outcome)])
         writer.writeheader()
         writer.writerows(asdict(o) for o in outcomes)
+
+
+def read_outcomes(path: Path) -> list[Outcome]:
+    """The rounds of a spree, from its ``rounds.csv``."""
+    with path.open(encoding="utf-8", newline="") as f:
+        return [
+            Outcome(
+                row["variant"],
+                row["dodger"],
+                int(row["district"]),
+                int(row["seed"]),
+                row["start"],
+                row["night"] == "True",
+                row["escaped"] == "True",
+                row["how"],
+                float(row["caught_min"]) if row["caught_min"] else None,
+                int(row["rides"]),
+                int(row["fines"]),
+            )
+            for row in csv.DictReader(f)
+        ]
+
+
+#: Real seconds around each round: the countdown and the break after it.
+ROUND_OVERHEAD_S = 3.0 + 8.0
+#: Overtime can't go on forever in a simulation.
+MAX_MATCH_ROUNDS = 60
+
+
+def round_minutes(outcomes: list[Outcome], cfg: LiveConfig) -> list[float]:
+    """How long each bot Dodger round took in real minutes (a caught Dodger ends it early),
+    with the countdown and the break."""
+    return [
+        (o.caught_min if o.caught_min is not None else cfg.duration_minutes) / cfg.time_scale
+        + ROUND_OVERHEAD_S / 60
+        for o in outcomes
+        if o.dodger == "bot"
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class MatchStats:
+    regulation: int
+    #: How often the better team takes the match.
+    better_wins: float
+    #: How often regulation ends in a tie.
+    overtime: float
+    rounds: float
+    minutes: float
+    #: 9 in 10 matches are over within this long.
+    p90_minutes: float
+
+
+def simulate_matches(
+    regulation: int,
+    escape: float,
+    skill: float,
+    minutes: list[float],
+    n: int = 20_000,
+    seed: int = 0,
+) -> MatchStats:
+    """1v1 matches of ``regulation`` rounds under the live match rules (halftime switch,
+    overtime until a two-point lead). A Dodger escapes with ``escape``; team A is better by
+    ``skill``: it escapes ``escape + skill`` as the Dodger and lets the other team escape
+    ``escape - skill``. Each round lasts a random one of ``minutes``."""
+    rng = random.Random(seed)
+    wins = overtime = total_rounds = 0
+    lengths = []
+    for _ in range(n):
+        start = rng.choice((Role.DODGER, Role.HUNTER))
+        a = b = k = 0
+        length = 0.0
+        winner = None
+        while winner is None and k < MAX_MATCH_ROUNDS:
+            k += 1
+            a_runs = role_for(k, regulation, start) is Role.DODGER
+            p = min(1.0, max(0.0, escape + skill if a_runs else escape - skill))
+            escaped = rng.random() < p
+            if escaped == a_runs:
+                a += 1
+            else:
+                b += 1
+            length += rng.choice(minutes)
+            winner = match_winner(a, b, k, regulation)
+        wins += winner is True
+        overtime += k > regulation
+        total_rounds += k
+        lengths.append(length)
+    lengths.sort()
+    return MatchStats(
+        regulation,
+        wins / n,
+        overtime / n,
+        total_rounds / n,
+        statistics.fmean(lengths),
+        lengths[int(0.9 * (n - 1))],
+    )
+
+
+def _balanced(escaped: float, still: float, tolerance: float) -> bool:
+    """Near the target, and standing still loses (or wasn't tried)."""
+    return abs(escaped - TARGET) <= tolerance and not still > STILL_MAX
+
+
+def lengths_report(
+    variants: list[Variant],
+    cfg: LiveConfig,
+    outcomes: list[Outcome],
+    regulations: list[int],
+    skill: float,
+    tolerance: float = 0.05,
+    n: int = 20_000,
+) -> str:
+    """Round lengths and match lengths: each variant's escape rate and real round time, then
+    simulated matches of every length in ``regulations`` for the variants within
+    ``tolerance`` of :data:`TARGET` (the balanced ones)."""
+    rows = []
+    for v in variants:
+        bot = [o for o in outcomes if o.variant == v.name and o.dodger == "bot"]
+        still = [o for o in outcomes if o.variant == v.name and o.dodger == "still"]
+        if not bot:
+            continue
+        vcfg = v.apply(cfg)
+        rows.append((v, vcfg, _rate(bot), _rate(still), round_minutes(bot, vcfg)))
+    lines = [
+        "## Rounds",
+        "",
+        f"Bot Dodger escape target {_pct(TARGET)}; balanced: within {_pct(tolerance)} of it.",
+        "",
+        "| variant | round (timetable min) | escaped | still | real min per round | balanced |",
+        "|---|---|---|---|---|---|",
+    ]
+    for v, vcfg, escaped, still_rate, minutes in rows:
+        ok = "yes" if _balanced(escaped, still_rate, tolerance) else ""
+        lines.append(
+            f"| {v.name} | {vcfg.duration_minutes} | {_pct(escaped)} | {_pct(still_rate)} "
+            f"| {statistics.fmean(minutes):.1f} | {ok} |"
+        )
+    balanced = [r for r in rows if _balanced(r[2], r[3], tolerance)]
+    lines += [
+        "",
+        "## Matches",
+        "",
+        f"{n} simulated 1v1 matches each, under the live match rules. The better team escapes "
+        f"{100 * skill:.0f} points more often as the Dodger and lets the other team escape "
+        f"{100 * skill:.0f} points less. Minutes are real time, with countdowns and breaks.",
+        "",
+        "| variant | rounds | better team wins | overtime | rounds played | minutes | 90% within |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for v, _, escaped, _, minutes in balanced:
+        for reg in regulations:
+            m = simulate_matches(reg, escaped, skill, minutes, n=n)
+            lines.append(
+                f"| {v.name} | {reg} | {_pct(m.better_wins)} | {_pct(m.overtime)} "
+                f"| {m.rounds:.1f} | {m.minutes:.0f} | {m.p90_minutes:.0f} |"
+            )
+    return "\n".join(lines) + "\n"

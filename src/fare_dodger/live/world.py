@@ -17,7 +17,7 @@ import math
 import random
 from bisect import bisect_right
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fare_dodger.config import Area
 from fare_dodger.geo import metres_per_degree
@@ -101,6 +101,8 @@ class World:
     def __init__(self, tt: Timetable, area: Area, hops: Hops | None = None) -> None:
         self.tt = tt
         self.area = area
+        #: Live settings of this district's rounds, over the match's (e.g. ``hunter_extra``).
+        self.rules: dict[str, Any] = {}
         n = tt.n_nodes
         self.proj = Projection(sum(tt.node_lat) / n, sum(tt.node_lon) / n)
         self.node_xy = [self.proj.to_xy(tt.node_lat[i], tt.node_lon[i]) for i in range(n)]

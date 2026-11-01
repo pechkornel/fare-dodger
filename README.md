@@ -50,7 +50,8 @@ teams, CS-style.
 - **Playing together:** the menu offers **Play solo** (you against bots), **Create a game**
   (1v1, 2v2 or 3v3) and **Join a game** by its 4-letter code. In the lobby, players join the
   smaller team and can switch. The host starts the match whenever they like: empty places are
-  played by bots, the hunting side always gets three extra bots, and a random team runs first.
+  played by bots, the hunting side gets extra bots (three, or what the district sets), and a
+  random team runs first.
 - **Scoring:** every Dodger is a point. Escaping scores for the runners, being caught scores
   for the hunters, so a 2v2 round can end 1–1. The hunters win the round outright by catching
   everyone. A match is quick (best of 3) or long (best of 6), picked in the menu: the first
