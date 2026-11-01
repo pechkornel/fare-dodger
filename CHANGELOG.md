@@ -17,6 +17,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   escape rate is to 45%, with day vs night and a Dodger standing still as checks (ADR 0019).
 
 ### Fixed
+- Live game: a line that leaves the district and comes back (say, a bus looping out) no
+  longer takes you on one long, slow ride between its last stop out and its first stop back:
+  each part inside the district is its own trip. Picking a later departure (keys 4-6) often
+  hit one.
 - Live game: the Bounty Hunters' map shows the red report circle of every Dodger, not only
   the newest one (the minimap already did).
 

@@ -21,9 +21,30 @@ from fare_dodger.network.transfers import walking_transfers
 from fare_dodger.timeutil import parse_hms
 
 #: Bump whenever the build logic changes so cached networks are rebuilt.
-BUILD_VERSION = 8
+BUILD_VERSION = 9
+
+#: A trip that leaves the area and comes back is split into parts; the second part's trip
+#: id is the GTFS one with this and its number (``"T1~2"``).
+PART_SEP = "~"
 
 _RAIL_MODES = frozenset({Mode.METRO, Mode.SUBURBAN_RAIL})
+
+
+def base_trip_id(trip_id: str) -> str:
+    """The GTFS trip a (possibly split) timetable trip comes from."""
+    head, sep, tail = trip_id.rpartition(PART_SEP)
+    return head if sep and tail.isdigit() else trip_id
+
+
+def _inside_runs(visits: list[int]) -> list[tuple[int, int]]:
+    """``[lo, hi)`` slices of a trip's in-area stops with no stop outside between them
+    (``visits``: each one's place in the whole trip)."""
+    runs, lo = [], 0
+    for i in range(1, len(visits) + 1):
+        if i == len(visits) or visits[i] != visits[i - 1] + 1:
+            runs.append((lo, i))
+            lo = i
+    return runs
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,8 +118,12 @@ def build_timetable(feed: RawFeed, cfg: NetworkConfig) -> Timetable:
     trip_route = {
         t: r for t, r in feed.trips.select("trip_id", "route_id").iter_rows() if r in routes
     }
-    rows = feed.stop_times.filter(
-        pl.col("trip_id").is_in(sorted(trip_route)) & pl.col("stop_id").is_in(sorted(platforms))
+    # Each stop's place in its trip (stop_times are sorted by trip and sequence), so a trip
+    # that leaves the area and comes back can be split where it leaves (below).
+    rows = (
+        feed.stop_times.filter(pl.col("trip_id").is_in(sorted(trip_route)))
+        .with_columns(pl.int_range(pl.len()).over("trip_id").alias("visit"))
+        .filter(pl.col("stop_id").is_in(sorted(platforms)))
     )
     rail_routes = [r for r, info in routes.items() if info.mode in _RAIL_MODES]
     rail_trips = [t for t, r in trip_route.items() if r in set(rail_routes)]
@@ -111,15 +136,19 @@ def build_timetable(feed: RawFeed, cfg: NetworkConfig) -> Timetable:
     cluster_of = {pid: i for i, c in enumerate(clusters) for pid in c.platform_ids}
 
     raw_trips: list[TripSequence] = []
-    grouped = rows.group_by("trip_id", maintain_order=True).agg("stop_id", "arrival", "departure")
-    for trip_id, stop_ids, arrivals, departures in grouped.sort("trip_id").iter_rows():
-        nodes, arr, dep = collapse_repeats(
-            [cluster_of[s] for s in stop_ids], list(arrivals), list(departures)
-        )
-        if len(nodes) >= 2:
-            raw_trips.append(
-                TripSequence(trip_id, trip_route[trip_id], tuple(nodes), tuple(arr), tuple(dep))
+    grouped = rows.group_by("trip_id", maintain_order=True).agg(
+        "stop_id", "arrival", "departure", "visit"
+    )
+    for trip_id, stop_ids, arrivals, departures, visits in grouped.sort("trip_id").iter_rows():
+        for k, (lo, hi) in enumerate(_inside_runs(visits)):
+            nodes, arr, dep = collapse_repeats(
+                [cluster_of[s] for s in stop_ids[lo:hi]], arrivals[lo:hi], departures[lo:hi]
             )
+            if len(nodes) >= 2:
+                part = trip_id if k == 0 else f"{trip_id}{PART_SEP}{k + 1}"
+                raw_trips.append(
+                    TripSequence(part, trip_route[trip_id], tuple(nodes), tuple(arr), tuple(dep))
+                )
 
     points = [[(platforms[p].lat, platforms[p].lon) for p in c.platform_ids] for c in clusters]
     paths = walking_transfers(points, cfg.walk_radius_m, cfg.walk_speed_mps, cfg.walk_detour_factor)
@@ -194,7 +223,7 @@ def _assemble(
             served[node].append((p_idx, pos))
         for trip in pattern.trips:
             trip_ids.append(trip.trip_id)
-            trip_headsigns.append(headsign_of.get(trip.trip_id) or "")
+            trip_headsigns.append(headsign_of.get(base_trip_id(trip.trip_id)) or "")
             trip_time_ptr.append(len(trip_arr))
             trip_arr.extend(trip.arrivals)
             trip_dep.extend(trip.departures)

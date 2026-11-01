@@ -19,6 +19,7 @@ import polars as pl
 
 from fare_dodger.geo import distance_m
 from fare_dodger.gtfs.load import read_table
+from fare_dodger.network.build import base_trip_id
 from fare_dodger.network.timetable import Timetable
 
 #: Bump whenever the cutting logic changes so cached paths are rebuilt.
@@ -85,7 +86,11 @@ def build_hops(feed_dir: Path, tt: Timetable) -> Hops:
     if "shape_dist_traveled" not in stop_times_lf.collect_schema().names():
         return hops
 
-    first_trip = {tt.trip_id[tt.pat_trip_ptr[p]]: p for p in range(tt.n_patterns)}
+    # A pattern's first trip, by its GTFS trip (a trip that leaves the area and comes back
+    # is split into parts, each its own pattern).
+    first_trip: dict[str, list[int]] = defaultdict(list)
+    for p in range(tt.n_patterns):
+        first_trip[base_trip_id(tt.trip_id[tt.pat_trip_ptr[p]])].append(p)
     trips = read_table(feed_dir, "trips", ["trip_id"], ["shape_id"]).filter(
         pl.col("trip_id").is_in(sorted(first_trip)) & pl.col("shape_id").is_not_null()
     )
@@ -132,22 +137,47 @@ def build_hops(feed_dir: Path, tt: Timetable) -> Hops:
 
     node_of = {pid: n for n, pids in enumerate(tt.node_platforms) for pid in pids}
     for trip_id, shape_id in sorted(shape_of.items()):
-        p = first_trip[trip_id]
-        stops = tt.pattern_stops(p)
-        visits = _stop_distances(stop_rows.get(trip_id, []), node_of)
-        if shape_id not in shapes or visits is None or [v[0] for v in visits] != stops:
+        all_visits = _stop_distances(stop_rows.get(trip_id, []), node_of)
+        if shape_id not in shapes or all_visits is None:
             continue
         points, dists = shapes[shape_id]
-        for i, (a, b) in enumerate(itertools.pairwise(visits)):
-            if b[1] <= a[2]:
-                continue
-            path = cut_shape(points, dists, a[2], b[1])
-            na, nb = stops[i], stops[i + 1]
-            ends = [(tt.node_lat[na], tt.node_lon[na]), (tt.node_lat[nb], tt.node_lon[nb])]
-            straight = _length_m(ends)
-            if _length_m([ends[0], *path, ends[1]]) <= MAX_DETOUR * straight + MAX_DETOUR_SLACK_M:
-                hops[p][i] = [(round(lat, 6), round(lon, 6)) for lat, lon in path]
+        for p in first_trip[trip_id]:
+            stops = tt.pattern_stops(p)
+            visits = _part(all_visits, stops)
+            if visits is not None:
+                _shape_hops(hops[p], tt, stops, visits, points, dists)
     return hops
+
+
+def _part(
+    visits: list[tuple[int, float, float]], stops: list[int]
+) -> list[tuple[int, float, float]] | None:
+    """The run of ``visits`` that is the pattern's ``stops`` (one part of a split trip)."""
+    nodes, n = [v[0] for v in visits], len(stops)
+    for i in range(len(nodes) - n + 1):
+        if nodes[i : i + n] == stops:
+            return visits[i : i + n]
+    return None
+
+
+def _shape_hops(
+    hops: list[list[LatLon]],
+    tt: Timetable,
+    stops: list[int],
+    visits: list[tuple[int, float, float]],
+    points: list[LatLon],
+    dists: list[float],
+) -> None:
+    """Each hop of one pattern along its shape, where that is not a long detour."""
+    for i, (a, b) in enumerate(itertools.pairwise(visits)):
+        if b[1] <= a[2]:
+            continue
+        path = cut_shape(points, dists, a[2], b[1])
+        na, nb = stops[i], stops[i + 1]
+        ends = [(tt.node_lat[na], tt.node_lon[na]), (tt.node_lat[nb], tt.node_lon[nb])]
+        straight = _length_m(ends)
+        if _length_m([ends[0], *path, ends[1]]) <= MAX_DETOUR * straight + MAX_DETOUR_SLACK_M:
+            hops[i] = [(round(lat, 6), round(lon, 6)) for lat, lon in path]
 
 
 XY = tuple[float, float]
