@@ -556,15 +556,16 @@ function renderMarks(list) {
   });
 }
 
-// Sight circles of the Bounty Hunters on foot and the last radar ping, drawn on the ground.
+// Sight circles of the Bounty Hunters on foot and the last radar pings, drawn on the ground.
 function renderGround(s) {
   // A Dodger sees the Bounty Hunters (and so their circles) only zoomed in close.
   const close = s.role === "hunter" || map.getZoom() >= SWITCH_ZOOM;
   const features = s.hunters.filter((h) => !h.riding && close).map((h) => feature(
     { type: "Polygon", coordinates: [circle(h.pos, world.sight_radius_m)] }, { kind: "sight" }));
-  if (s.ping) {
-    const fade = Math.max(0.15, 1 - s.ping.age_s / world.ping_every_s);
-    features.push(feature({ type: "Polygon", coordinates: [circle(s.ping.pos, 60)] },
+  // Every Dodger's last report, not just the newest (as on the minimap).
+  for (const ping of s.pings || []) {
+    const fade = Math.max(0.15, 1 - ping.age_s / world.ping_every_s);
+    features.push(feature({ type: "Polygon", coordinates: [circle(ping.pos, 60)] },
       { kind: "ping", fade }));
   }
   map.getSource("dynamic").setData(fc(features));
