@@ -6,6 +6,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `fare-dodger balance`: balance sprees. Every rule variant in `configs/balance.toml` (one
+  rule at a time, or named combinations) plays the same bot-only rounds in parallel, on four
+  districts at the live random start times. They're ranked by how close the bot Dodger's
+  escape rate is to 45%, with day vs night and a Dodger standing still as checks (ADR 0019).
+
+### Changed
+- Live game: the bot Dodger knows only what a human Dodger knows. It sees the Bounty Hunters
+  within 200 m and remembers them for a while. It also knows the top bar's distance to the
+  nearest one, and moves on when that turns red. With that, the current rules give 44% over
+  four districts, on target, and no variant in the first spree did better.
+
 ### Changed (balance)
 - Live game: the bigger districts made the Dodger too strong (the bot Dodger escaped 72%).
   Reports now come every 180 timetable seconds (20 real seconds), the hunting side gets

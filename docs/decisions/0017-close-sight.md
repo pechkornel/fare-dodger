@@ -23,7 +23,8 @@ only when they are quite zoomed in.
 
 ## Consequences
 - The bot Dodger still plans with full knowledge of the Bounty Hunters. That's a known
-  advantage, left for the balance pass.
+  advantage, left for the balance pass. (Fixed in ADR 0019: it now sees only what a human
+  Dodger sees.)
 - The zoom limit is enforced only in the client. The server sends just the close ones, so
   zooming in on a far street shows nothing new.
 

@@ -108,6 +108,25 @@ See [ADR 0005](docs/decisions/0005-live-prototype.md),
 [ADR 0013](docs/decisions/0013-packages.md) and
 [ADR 0011](docs/decisions/0011-online-and-deployment.md).
 
+#### Balance sprees
+
+After changing a rule, measure it:
+
+```sh
+uv run fare-dodger balance            # every variant in configs/balance.toml
+uv run fare-dodger balance --rounds 200 --district "Inner Pest" --only "ping_every_s=240"
+```
+
+Each variant in [`configs/balance.toml`](configs/balance.toml) changes rules from
+`configs/live.toml`. A `[sweep]` lists values for one rule at a time, and a `[[variant]]`
+names a combination. Every variant plays the same bot-only rounds in parallel, on four
+districts at the live random start times. In each round two Dodgers face the bot Bounty
+Hunters: the bot Dodger, and one standing still. The bot knows only what a human Dodger
+sees. The ranking aims for the bot Dodger to escape 45% of rounds, about as often by day as
+by night, and for standing still to lose. The report is written to
+`results/balance/summary.md`, with every round in `rounds.csv`
+([ADR 0019](docs/decisions/0019-balance-sprees.md)).
+
 Every command takes `-c configs/default.toml`, which documents every network and rule
 setting. `--rule key=value` overrides a single rule for a simulation. The config pins the
 service date and applies the manual station merges in `configs/station_overrides.toml`, so
