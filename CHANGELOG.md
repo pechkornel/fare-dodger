@@ -16,6 +16,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   districts at the live random start times. They're ranked by how close the bot Dodger's
   escape rate is to 45%, with day vs night and a Dodger standing still as checks (ADR 0019).
 
+### Fixed
+- Live game: the Bounty Hunters' map shows the red report circle of every Dodger, not only
+  the newest one (the minimap already did).
+
 ### Changed
 - Live game: the bot Dodger knows only what a human Dodger knows. It sees the Bounty Hunters
   within 200 m and remembers them for a while. It also knows the top bar's distance to the
