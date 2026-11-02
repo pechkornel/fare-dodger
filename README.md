@@ -64,13 +64,18 @@ teams, CS-style.
   team leads by two. **Esc** leaves to the menu.
 - **Controls:** **WASD** move you up, left, down and right on the screen; hold two for a
   diagonal. You can walk anywhere except through buildings: streets, rail lines, parks and
-  squares are all open, and you slide along walls. **Right-drag** turns the map, and **N** turns
-  it back to north. The streets (for the bots' routes), buildings and cafés come from
-  OpenStreetMap and are downloaded once, about 40 MB; use `--no-osm` to skip them. Stand at a
-  stop and press **E** (or **1–6** to pick a
-  departure) to wait for a real tram, trolleybus, bus or metro. Press **E** again to get off at
-  the next stop. Press **E** again (or click the switch, bottom right: blue on board, red getting
-  off) to stay on. **Enter** starts the next round.
+  squares are all open, and you slide along walls. Hold **Shift** to sprint (1.6× as fast, for
+  about 5 real seconds; the ⚡ bar refills when you let go). **Right-drag** turns the map, and
+  **N** turns it back to north. The streets (for the bots' routes), buildings and cafés come
+  from OpenStreetMap and are downloaded once, about 40 MB; use `--no-osm` to skip them. Stand at
+  a stop and press **E** (or **1–6** to pick a departure) to wait for a real tram, trolleybus,
+  bus or metro. Each departure shows an arrow for the way it goes and the next stops it calls
+  at. Hover over one (or wait for it) to see its way ahead drawn on the map; on board, the map
+  shows where your ride goes next. Press **E** again to get off at the next stop. Press **E**
+  again (or click the switch, bottom right: blue on board, red getting off) to stay on.
+  **Enter** starts the next round. **M** turns the sound on or off: a heartbeat (and a red
+  screen edge) when a Bounty Hunter is close, doors and a whoosh when you board, alarms for
+  inspections and catches.
 - **As the Dodger:** survive. You start with 1,000 Ft. Buy a ticket at a stop with **T**
   (450 Ft), or *bliccel* and ride without one.
   - Earn money with packages: 📦 boxes wait around the district (only the Dodgers see them).

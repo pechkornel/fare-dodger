@@ -232,6 +232,12 @@ class LiveConfig(_Frozen):
     #: A brisk jog: faster than real walking so rounds stay short, still well below the
     #: vehicles (and street routes are longer than the straight line).
     walk_speed_kmh: float = Field(default=10.0, gt=0)
+    #: Sprinting (Shift, humans on foot): ``sprint_factor`` times the jogging speed until the
+    #: stamina runs out after ``sprint_s``; it refills over ``sprint_recover_s`` while not
+    #: sprinting (timetable seconds; at 9x, 5 and 12 real seconds).
+    sprint_factor: float = Field(default=1.6, ge=1)
+    sprint_s: float = Field(default=45.0, gt=0)
+    sprint_recover_s: float = Field(default=108.0, gt=0)
     #: A Bounty Hunter on foot this close to an exposed Dodger catches them.
     catch_radius_m: float = Field(default=25.0, gt=0)
     #: A Bounty Hunter on foot spots a Dodger on foot within this distance and gives chase.

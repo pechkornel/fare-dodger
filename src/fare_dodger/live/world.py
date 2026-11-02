@@ -278,6 +278,26 @@ class World:
         (x0, y0), (x1, y1) = path[j], path[j + 1]
         return math.atan2(y1 - y0, x1 - x0)
 
+    def path_ahead(self, pattern: int, hop: int, f: float, max_m: float) -> list[Point]:
+        """The way ahead along ``pattern`` from a fraction ``f`` of ``hop``: up to ``max_m``
+        metres, or to its last stop."""
+        hops = self._paths[pattern]
+        out = [self.hop_point(pattern, hop, f)] if hop < len(hops) else []
+        left = max_m
+        for j in range(hop, len(hops)):
+            path, cum = hops[j]
+            start = f * cum[-1] if j == hop else 0.0
+            for k in range(1, len(path)):
+                if cum[k] <= start:
+                    continue
+                d = distance(out[-1], path[k])
+                if d >= left:
+                    out.append(step_towards(out[-1], path[k], left))
+                    return out
+                left -= d
+                out.append(path[k])
+        return out
+
     def pattern_path(self, pattern: int) -> list[Point]:
         """The whole path of ``pattern``, stop to stop."""
         hops = self._paths[pattern]

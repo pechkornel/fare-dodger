@@ -2,10 +2,12 @@
 // out the map is flat with DOM markers; zoomed in it tilts into the 3D toy town (world3d.js).
 import { toonStyle } from "./toon-style.js";
 import { MAX_PITCH, SWITCH_ZOOM, ToyTown, pitchForZoom } from "./world3d.js";
+import { play, toggleMute, unlock } from "./sound.js";
 
 const KEYMAP = {
   KeyW: "up", ArrowUp: "up", KeyS: "down", ArrowDown: "down",
   KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right",
+  ShiftLeft: "sprint", ShiftRight: "sprint",
 };
 const MODE_COLORS = { metro: "#7950f2", tram: "#fcc419", trolleybus: "#fd7e14", bus: "#339af0",
   suburban_rail: "#2f9e44" };
@@ -42,7 +44,7 @@ let pressed = false;       // a mouse button or finger is down on the map
 let shownRound = null;   // round whose result overlay is showing
 let burstTimer = null;
 let match = null;
-const keys = { up: false, down: false, left: false, right: false };
+const keys = { up: false, down: false, left: false, right: false, sprint: false };
 const last = { money: null, tickets: null };
 // Camera: zoom eases towards cam.zoom, the tilt follows the zoom, and the centre follows you.
 const cam = { zoom: START_ZOOM, target: null };
@@ -54,6 +56,12 @@ let leaving = false;     // closing the connection on purpose (back to the menu)
 let pending = null;      // newest snapshot not drawn yet
 let pendingEvents = [];  // messages from every snapshot since the last frame
 let shownDepartures = []; // the departures on screen, for the 1-6 keys
+let hoverLine = null;      // "pattern:pos" of the departure under the mouse
+const aheadPaths = new Map(); // "district:pattern:pos" -> the line ahead ([lat, lon] points)
+let aheadShown = null;     // what the "ahead" layer shows now
+let lastState = null;      // the player's state in the previous snapshot (walk, ride...)
+let nextBeat = 0;          // when the heartbeat sounds next (performance.now() ms)
+let lastPingS = null;
 
 function init() {
   setupMinimap();
@@ -251,6 +259,19 @@ function addOverlays() {
   add({ id: "lines", type: "line", source: "lines",
     layout: { "line-cap": "round", "line-join": "round" },
     paint: { "line-color": ["get", "color"], "line-width": 5, "line-opacity": 0.75 } });
+  // The way the chosen departure (or your ride) goes next: a white-cased line with arrows.
+  map.addSource("ahead", { type: "geojson", data: fc([]) });
+  add({ id: "ahead-casing", type: "line", source: "ahead",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "#fff", "line-width": 13, "line-opacity": 0.95 } });
+  add({ id: "ahead", type: "line", source: "ahead",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": ["get", "color"], "line-width": 7 } });
+  add({ id: "ahead-arrows", type: "symbol", source: "ahead",
+    layout: { "symbol-placement": "line", "symbol-spacing": 60, "text-field": ">",
+      "text-font": ["Noto Sans Bold"], "text-size": 20, "text-keep-upright": false,
+      "text-rotation-alignment": "map", "text-allow-overlap": true },
+    paint: { "text-color": "#fff", "text-halo-color": INK, "text-halo-width": 1.5 } });
   add({ id: "sight", type: "fill", source: "dynamic", filter: ["==", ["get", "kind"], "sight"],
     paint: { "fill-color": "#fa5252", "fill-opacity": 0.1 } });
   add({ id: "sight-edge", type: "line", source: "dynamic",
@@ -457,10 +478,25 @@ function render(s) {
   }
   for (const e of s.events) {
     toast(e.kind, e.text);
-    if (e.kind === "inspection") burst(e.text.includes("valid") ? "good" : "bad");
-    else if (e.kind === "caught") burst("caught", `🚨 ${e.text}`, 2600);
-    else if (e.kind === "end" && s.player.state === "caught") burst("bad", "CAUGHT! 🚨", 2600);
+    if (e.kind === "inspection") {
+      const ok = e.text.includes("valid");
+      burst(ok ? "good" : "bad");
+      play(ok ? "ok" : "inspection");
+    } else if (e.kind === "caught") {
+      burst("caught", `🚨 ${e.text}`, 2600);
+      shake();
+      play("caught");
+    } else if (e.kind === "end" && s.player.state === "caught") {
+      burst("bad", "CAUGHT! 🚨", 2600);
+    } else if (e.kind === "end" && s.role === "dodger" && s.status === "escaped") {
+      play("escape");
+    } else if (e.kind === "board") play("board");
+    else if (e.kind === "alight") play("alight");
+    else if (e.kind === "coffee" && e.text.startsWith("☕")) play("coffee");
+    else if (e.kind === "package" || e.kind === "ticket") play("money");
   }
+  renderDanger(s);
+  renderAhead(s);
   renderJailBanner(s);
   renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
   renderHunters(s.hunters, s.role);
@@ -661,8 +697,10 @@ function renderHud(s) {
     const r = s.ride;
     const ticket = hunter ? "" :
       r.fined ? " · 🚨 fined" : r.ticket ? " · 🎫 valid" : " · 🙈 no ticket";
-    status = `Riding ${pill(r.mode, r.route)} → ${esc(r.headsign)}<br>` +
-      `<span class="muted">Next: ${esc(r.next_stop)}${ticket}` +
+    const then = r.via.map(esc).join(", ");
+    status = `Riding ${pill(r.mode, r.route)} ${arrow(r.bearing)} ${esc(r.headsign)}<br>` +
+      `<span class="muted">Next: <b>${esc(r.next_stop)}</b>${then ? `, then ${then}` : ""}` +
+      `${ticket}` +
       (r.alight_at ? ` · off at ${esc(r.alight_at)}` : " · E to get off") + "</span>";
   } else if (s.held_s !== null && s.jailed) {
     held = true;
@@ -707,14 +745,107 @@ function renderHud(s) {
   shownDepartures = s.stop ? s.stop.departures : [];
   if (!s.stop) { $("stop").innerHTML = cafe; return; }
   const rows = s.stop.departures.map((d, i) =>
-    `<div class="dep${d.waiting ? " waiting" : ""}"><span class="key">${i + 1}</span>` +
-    pill(d.mode, d.route) +
-    `<span class="headsign">${esc(d.headsign)}</span>` +
+    `<div class="dep${d.waiting ? " waiting" : ""}${lineKey(d) === hoverLine ? " hover" : ""}" ` +
+    `data-line="${lineKey(d)}"><span class="key">${i + 1}</span>` +
+    pill(d.mode, d.route) + arrow(d.bearing) +
+    `<span class="headsign">${esc(d.headsign)}` +
+    (d.via.length ? `<small>via ${d.via.map(esc).join(" · ")}</small>` : "") + "</span>" +
     `<span class="in">${d.in_s <= 0 ? "now" : mmss(d.in_s / world.time_scale)}</span></div>`);
   const buy = s.wallet
     ? `<span class="chip" id="buy">T · 🎫 ${world.ticket_price_ft} Ft</span>` : "";
   $("stop").innerHTML = cafe + `<h3><span>🚏 ${esc(s.stop.name)}</span>${buy}</h3>` +
     (rows.length ? rows.join("") : '<div class="muted">No departures soon.</div>');
+}
+
+const lineKey = (d) => `${d.pattern}:${d.pos}`;
+
+// Which way a vehicle goes, as an arrow on the screen (it turns with the map).
+function arrow(bearing) {
+  if (bearing == null) return '<span class="dir"></span>';
+  const turn = bearing - (map ? map.getBearing() : 0);
+  return `<span class="dir" title="Heads ${compass(bearing)}">` +
+    `<i style="transform: rotate(${Math.round(turn)}deg)">⬆</i></span>`;
+}
+const compass = (b) => ["north", "north-east", "east", "south-east", "south", "south-west",
+  "west", "north-west"][Math.round(b / 45) % 8];
+
+// The line ahead on the map: of the departure under the mouse, else the one you wait for,
+// else your ride's (from where you are).
+function renderAhead(s) {
+  let want = null;
+  let from = null;
+  const deps = s.stop ? s.stop.departures : [];
+  const hovered = deps.find((d) => lineKey(d) === hoverLine);
+  const waited = deps.find((d) => d.waiting);
+  const dep = hovered || waited;
+  if (dep) want = { key: lineKey(dep), mode: dep.mode };
+  else if (s.ride && s.ride.bearing != null) {
+    want = { key: lineKey(s.ride), mode: s.ride.mode };
+    from = s.player.pos;
+  }
+  const id = want ? `${district}:${want.key}` : null;
+  if (!id) {
+    if (aheadShown !== null) map.getSource("ahead").setData(fc([]));
+    aheadShown = null;
+    return;
+  }
+  const path = aheadPaths.get(id);
+  if (path === undefined) {
+    aheadPaths.set(id, null); // asked for
+    const [pattern, pos] = want.key.split(":");
+    fetch(`api/ahead/${district}/${pattern}/${pos}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => aheadPaths.set(id, body ? body.path : []))
+      .catch(() => aheadPaths.delete(id));
+    return;
+  }
+  if (!path || path.length < 2) return;
+  const shown = `${id}|${from ? from.join(",") : ""}`;
+  if (shown === aheadShown) return;
+  aheadShown = shown;
+  const coords = (from ? [from, ...path] : path).map(lngLat);
+  map.getSource("ahead").setData(fc([feature({ type: "LineString", coordinates: coords },
+    { color: MODE_COLORS[want.mode] || "#888" })]));
+}
+
+// Danger: a heartbeat that quickens and a red screen edge as a Bounty Hunter closes in (the
+// Dodger); a blip on every report (the Bounty Hunters). Also the whoosh of a sprint.
+function renderDanger(s) {
+  const running = s.status === "running" && s.player.state !== "caught";
+  const near = s.nearest_hunter_m;
+  const red = world.see_radius_m * 1.5;
+  let level = 0;
+  if (running && s.role === "dodger" && near !== null && near <= red) level = 1 - near / red;
+  $("vignette").style.opacity = level ? String(0.35 + 0.65 * level) : "0";
+  if (level) {
+    const now = performance.now();
+    if (now >= nextBeat) {
+      play("heartbeat");
+      nextBeat = now + 1100 - 650 * level;
+      const v = $("vignette");
+      v.classList.remove("beat");
+      void v.offsetWidth;
+      v.classList.add("beat");
+    }
+  }
+  if (s.role === "hunter" && running && lastPingS !== null && s.next_ping_s > lastPingS + 5) {
+    play("ping");
+  }
+  lastPingS = s.next_ping_s;
+  if (s.player.sprinting && lastState !== "sprint") play("sprint");
+  lastState = s.player.sprinting ? "sprint" : s.player.state;
+  const st = $("stamina");
+  st.hidden = !running || s.player.state !== "walk" ||
+    (s.player.stamina >= 1 && !s.player.sprinting);
+  $("stamina-bar").style.width = `${Math.round(s.player.stamina * 100)}%`;
+  st.classList.toggle("low", s.player.stamina < 0.25);
+}
+
+function shake() {
+  const el = $("map");
+  el.classList.remove("shake");
+  void el.offsetWidth;
+  el.classList.add("shake");
 }
 
 // In jail: a big countdown if it's you, and who is locked in (and for how long) for the rest.
@@ -821,6 +952,7 @@ function sendKeys() {
 }
 
 window.addEventListener("keydown", (ev) => {
+  unlock();
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   if (ev.target instanceof HTMLInputElement) return; // typing a name or a code
   if (!$("menu").hidden || !$("lobby").hidden) return;
@@ -831,6 +963,7 @@ window.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.repeat) return;
+  if (ev.code === "KeyM") { toast("info", toggleMute() ? "🔇 Sound off (M)" : "🔊 Sound on (M)"); return; }
   if (ev.code === "Escape") {
     if (match && match.winner) quitToMenu();
     else if (confirm("Leave the match and go back to the main menu?")) quitToMenu();
@@ -854,6 +987,8 @@ window.addEventListener("keydown", (ev) => {
   else if (ev.code === "KeyR") restart();
 });
 
+window.addEventListener("pointerdown", unlock);
+
 window.addEventListener("keyup", (ev) => {
   const dir = KEYMAP[ev.code];
   if (dir && keys[dir]) { keys[dir] = false; sendKeys(); }
@@ -870,6 +1005,11 @@ $("stop").addEventListener("pointerdown", (ev) => {
   if (ev.target.closest("#coffee")) send({ type: "coffee" });
   if (ev.target.closest("#take-parcel")) send({ type: "use" });
 });
+// Hovering a departure draws where it goes.
+$("stop").addEventListener("mouseover", (ev) => {
+  hoverLine = ev.target.closest(".dep")?.dataset.line ?? null;
+});
+$("stop").addEventListener("mouseleave", () => { hoverLine = null; });
 $("again").addEventListener("click", () => {
   if ($("again").dataset.action === "restart") restart();
   else nextRound();

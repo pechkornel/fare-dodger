@@ -33,3 +33,28 @@ hunter_extra = 4
 name = "short rounds, more reports"
 duration_minutes = 25
 ping_every_s = 150
+
+# Faster rounds (a playtest asked for a faster pace). Shorter rounds favour the Dodger, so
+# they come with more reports and tighter catches.
+[[variant]]
+name = "fast: 25 min, reports 150"
+duration_minutes = 25
+ping_every_s = 150
+
+[[variant]]
+name = "fast: 25 min, reports 120"
+duration_minutes = 25
+ping_every_s = 120
+
+[[variant]]
+name = "fast: 20 min, reports 120, close starts"
+duration_minutes = 20
+ping_every_s = 120
+min_start_distance_min = 5
+
+[[variant]]
+name = "fast: 25 min, reports 150, quick penalties"
+duration_minutes = 25
+ping_every_s = 150
+fine_hold_s = 45
+jail_s = 15.0

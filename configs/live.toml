@@ -42,6 +42,9 @@ ping_every_s = 180           # the Bounty Hunters learn the Dodger's position th
 hunter_extra = 3             # Bounty Hunters = Dodgers + 3 (bots fill the team)
 freeze_s = 3.0               # real seconds of countdown before each round
 walk_speed_kmh = 10.0        # a brisk jog; walking is along the streets
+sprint_factor = 1.6          # Shift: this much faster while the stamina lasts...
+sprint_s = 45.0              # ...for this long (5 real seconds)
+sprint_recover_s = 108.0     # stamina refills over this long, not sprinting (12 real seconds)
 catch_radius_m = 25.0        # Bounty Hunter on foot this close to an exposed Dodger
 sight_radius_m = 200.0       # Bounty Hunters on foot chase a Dodger on foot within this
 see_radius_m = 200.0         # the sides see each other on the map only this close (zoomed in)

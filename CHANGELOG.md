@@ -7,6 +7,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Live game: sprint. Hold Shift to run 1.6 times as fast for about 5 real seconds; the ⚡
+  stamina bar refills over 12 seconds, and a spent sprint needs a quarter of it back. Both
+  sides can sprint; the bots don't.
+- Live game: which way a vehicle goes. Each departure has an arrow pointing the way it leaves
+  (it turns with the map) and lists the next three stops it calls at. Hovering over a
+  departure, or waiting for one, draws its next 1.5 km on the map with arrows; on board, the
+  map shows where the ride goes next, and the panel lists the stops after the next one.
+- Live game: sound and danger feedback (M mutes). As the Dodger, a heartbeat quickens and a
+  red edge pulses as the nearest Bounty Hunter closes in. A catch shakes the screen. Boarding,
+  getting off, inspections, coffee, money and escapes have their own sounds, and the Bounty
+  Hunters hear each new report.
 - Live game: a catch flashes big on everyone's screen ("CAUGHT!" if it's you). In jail you
   get a big countdown to the door opening, and everyone else sees who is locked in and for
   how long.
