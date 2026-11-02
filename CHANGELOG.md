@@ -6,6 +6,23 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Performance
+- Live game, 3D view: each person is about 12 draw calls instead of about 55. Their parts are
+  merged per rigid piece (body, legs, arms, bubble), like the vehicles (5 people, 5 vehicles
+  and the jail: 321 draw calls a frame down to 106).
+- Houses are built in a Web Worker (`houses-worker.js`, sharing `houses.js` with a 2.5 ms a
+  frame fallback on the main thread), so new areas no longer stutter while they load. Houses
+  are merged per 300 m square and trees per 400 m square, so squares off screen are skipped.
+- Zoomed into the 3D view, the flat map's markers are removed instead of hidden (MapLibre
+  moved all of them every frame), and the Bounty Hunters' sight circles are discs in the 3D
+  layer. Zoomed out, the ground circles are re-sent to the map only when they change, at most
+  5 times a second.
+- The map draws at most 1.5 pixels per CSS pixel on Retina and 4K screens.
+- The camera follows you at the same speed whatever the frame rate, so a dropped frame no
+  longer jerks it.
+- In a headless test (software WebGL, Inner Pest, zoomed in), a frame took 120 ms instead
+  of 383 ms.
+
 ### Changed
 - Live game: faster rounds. A round is 30 timetable minutes (about 3⅓ real minutes, was 4),
   and the Bounty Hunters get a report every 120 timetable seconds (13 real seconds, was 20).

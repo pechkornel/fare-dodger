@@ -19,6 +19,10 @@ const START_ZOOM = 17.2;
 // Budapest and a little around it ([west, south], [east, north]): the camera never leaves it,
 // so no map tiles are fetched for the rest of the world.
 const MAP_BOUNDS = [[18.86, 47.33], [19.36, 47.63]];
+const MAX_PIXEL_RATIO = 1.5;
+// The camera covers this share of the way to you in a 60th of a second (time-based, so a
+// dropped frame doesn't jerk it).
+const FOLLOW_RATE = -Math.log(1 - 0.2) * 60;
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -140,6 +144,8 @@ function createMap(w) {
     center: lngLat(w.center), zoom: cam.zoom, pitch: pitchForZoom(cam.zoom),
     minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, maxPitch: MAX_PITCH, maxBounds: MAP_BOUNDS,
     attributionControl: { compact: true },
+    // Retina and 4K screens: the houses' shader runs per pixel, so cap the pixels drawn.
+    pixelRatio: Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO),
     // Right-click drag (or Ctrl+drag) turns the map; the tilt still follows the zoom.
     dragRotate: true, pitchWithRotate: false, touchPitch: false, keyboard: false,
     scrollZoom: false, doubleClickZoom: false, boxZoom: false,
@@ -207,7 +213,8 @@ function frame() {
     const c = map.getCenter();
     const [lon, lat] = lngLat(cam.target);
     if (Math.abs(lon - c.lng) + Math.abs(lat - c.lat) > 1e-7) {
-      view.center = [c.lng + (lon - c.lng) * 0.2, c.lat + (lat - c.lat) * 0.2];
+      const f = 1 - Math.exp(-dt * FOLLOW_RATE);
+      view.center = [c.lng + (lon - c.lng) * f, c.lat + (lat - c.lat) * f];
     }
   }
   if (Object.keys(view).length) map.jumpTo(view);
@@ -403,6 +410,7 @@ function circle([lat, lon], radius) {
 }
 
 function clearDynamic() {
+  groundKey = null;
   for (const m of markers.vehicles.values()) m.remove();
   markers.vehicles.clear();
   for (const m of markers.hunters) m.remove();
@@ -498,12 +506,18 @@ function render(s) {
   renderDanger(s);
   renderAhead(s);
   renderJailBanner(s);
-  renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
-  renderHunters(s.hunters, s.role);
-  renderDodgers(s.dodgers, s.role);
+  // Zoomed into the toy town the flat markers are hidden: drop them instead of moving them
+  // (MapLibre repositions every marker on every frame).
+  const toy = $("map").classList.contains("toy");
+  if (toy) clearFlatMarkers();
+  else {
+    renderVehicles(s.vehicles, s.ride ? s.ride.trip : null);
+    renderHunters(s.hunters, s.role);
+    renderDodgers(s.dodgers, s.role);
+    renderPlayer(s.player, s.role);
+  }
   renderMarks(s.marks || []);
-  renderGround(s);
-  renderPlayer(s.player, s.role);
+  renderGround(s, toy);
   town.update(s);
   renderScore(match);
   renderHud(s);
@@ -595,17 +609,39 @@ function renderMarks(list) {
   });
 }
 
+function clearFlatMarkers() {
+  for (const m of markers.vehicles.values()) m.remove();
+  markers.vehicles.clear();
+  for (const m of markers.hunters) m.remove();
+  markers.hunters = [];
+  for (const m of markers.dodgers || []) m.remove();
+  markers.dodgers = [];
+  if (markers.player) { markers.player.remove(); markers.player = null; }
+}
+
 // Sight circles of the Bounty Hunters on foot and the last radar pings, drawn on the ground.
-function renderGround(s) {
+// In the toy town the sight circles are discs in the 3D layer; here the GeoJSON source (which
+// MapLibre re-processes on every update) changes only when what it shows does, and with
+// moving circles at most GROUND_HZ times a second.
+const GROUND_HZ = 5;
+let groundKey = null;
+let groundAt = 0;
+function renderGround(s, toy) {
   // A Dodger sees the Bounty Hunters (and so their circles) only zoomed in close.
-  const close = s.role === "hunter" || map.getZoom() >= SWITCH_ZOOM;
-  const features = s.hunters.filter((h) => !h.riding && close).map((h) => feature(
+  const sight = toy ? [] : s.hunters.filter((h) => !h.riding && s.role === "hunter");
+  const pings = (s.pings || []).map((ping) => ({ pos: ping.pos,
+    fade: Math.round(Math.max(0.15, 1 - ping.age_s / world.ping_every_s) * 20) / 20 }));
+  const key = JSON.stringify([sight.map((h) => h.pos), pings]);
+  const now = performance.now();
+  if (key === groundKey || (sight.length && now - groundAt < 1000 / GROUND_HZ)) return;
+  groundKey = key;
+  groundAt = now;
+  const features = sight.map((h) => feature(
     { type: "Polygon", coordinates: [circle(h.pos, world.sight_radius_m)] }, { kind: "sight" }));
   // Every Dodger's last report, not just the newest (as on the minimap).
-  for (const ping of s.pings || []) {
-    const fade = Math.max(0.15, 1 - ping.age_s / world.ping_every_s);
+  for (const ping of pings) {
     features.push(feature({ type: "Polygon", coordinates: [circle(ping.pos, 60)] },
-      { kind: "ping", fade }));
+      { kind: "ping", fade: ping.fade }));
   }
   map.getSource("dynamic").setData(fc(features));
 }
@@ -794,9 +830,9 @@ function renderAhead(s) {
     aheadPaths.set(id, null); // asked for
     const [pattern, pos] = want.key.split(":");
     fetch(`api/ahead/${district}/${pattern}/${pos}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body) => aheadPaths.set(id, body ? body.path : []))
-      .catch(() => aheadPaths.delete(id));
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((body) => aheadPaths.set(id, body.path))
+      .catch(() => setTimeout(() => aheadPaths.delete(id), 2000));   // ask again later
     return;
   }
   if (!path || path.length < 2) return;

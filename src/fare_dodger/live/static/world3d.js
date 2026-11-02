@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { Batcher, PROPS, cellOf, fromArrays, makeBuilding, pointInRing } from "./houses.js";
 
 /** Zoom at which the map switches between the flat view and the toy town. */
 export const SWITCH_ZOOM = 15.5;
@@ -25,17 +26,16 @@ const MODE_COLORS = { metro: "#7950f2", tram: "#fcc419", trolleybus: "#fd7e14", 
 const ROLE_COLORS = {
   dodger: "#40c057", hunter: "#fa5252", team: "#ffa8a8", wanted: "#ffd43b",
 };
-const WALLS = ["#ffe8c2", "#ffd1b3", "#ffe08a", "#cdeccf", "#cfe3ff", "#f3d1ff", "#ffc4c4",
-  "#fff4e0"];
-const ROOFS = ["#ea8a66", "#e8775a", "#7395cf", "#5cc2a8", "#f2b25c", "#a98be0", "#ef7d7a",
-  "#8cc47a"];
-// Real buildings are squashed so the streets between them stay readable from above.
-const HEIGHT_SCALE = 0.6;
 const MAX_TREES = 10000;
 const TREE_SPACING_M = 16;
 const REACH_MARGIN_M = 600;    // houses and trees are made this far beyond the play area
-const BUILD_BUDGET_MS = 6;     // building geometry made per frame
-const CHUNK_SIZE = 250;        // buildings merged into one mesh
+// Houses are built in a worker (houses-worker.js); without one, on the main thread for at
+// most this long a frame.
+const BUILD_BUDGET_MS = 2.5;
+const BATCH_HOUSES = 40;       // footprints per message to the worker
+// Trees: one instanced mesh per square of this many tree spacings a side, so the squares off
+// screen are skipped.
+const TREE_CELL = 25;
 
 const LIGHT = new THREE.Vector3(-0.38, -0.57, 0.73).normalize();
 
@@ -110,24 +110,6 @@ function rbox(x, y, z, radius = 0.12, segments = 2) {
     geoCache.set(key, new RoundedBoxGeometry(x, y, z, segments, r));
   }
   return geoCache.get(key);
-}
-
-function part(parent, geo, color, x, y, z, outline = null, xrayColor = null) {
-  const mesh = new THREE.Mesh(geo, toon(color));
-  mesh.position.set(x, y, z);
-  mesh.renderOrder = 2;
-  if (outline) {
-    const hull = new THREE.Mesh(geo, outline);
-    hull.renderOrder = 2;
-    mesh.add(hull);
-  }
-  if (xrayColor) {
-    const ghost = new THREE.Mesh(geo, xray(xrayColor));
-    ghost.renderOrder = 1;
-    mesh.add(ghost);
-  }
-  parent.add(mesh);
-  return mesh;
 }
 
 function coloured(geo, color, x, y, z, rotY = 0, rotX = 0) {
@@ -365,20 +347,34 @@ const OUTFITS = {
     hat: "#c08a52", hair: "#2b2118", vest: "#a47148", scarf: "#f59f00" },
 };
 
-export function makePerson(kind) {
+// A person's parts are merged per rigid piece (the body with its head and hat, each leg, each
+// arm, the "!" bubble), each piece a vertex-coloured mesh, an outline hull and a see-through
+// ghost: about a dozen draw calls a person instead of a hundred. Made once per outfit, like
+// the vehicles. Leg and arm pieces are centred on their hip and shoulder joints.
+const PERSON_MAT = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap });
+const HIP = [0.19, 0.8];          // y (times the side) and z of the hip joints
+const SHOULDER = [0.5, 1.44];
+const personTemplates = new Map();
+
+function personTemplate(kind) {
+  if (personTemplates.has(kind)) return personTemplates.get(kind);
   const fit = OUTFITS[kind];
   const cowboy = kind === "hunter" || kind === "team";
-  const root = new THREE.Group();
-  const body = new THREE.Group();
-  root.add(body);
-  shadow(root, 0.8, 0.8);
-  const o = OUTLINE_PERSON;
-  const legs = [];
-  const arms = [];
+  const o = true;   // with an outline
+  const piece = () => ({ solid: [], hull: [], ghost: [] });
+  const body = piece();
+  const legs = [piece(), piece()];
+  const arms = [piece(), piece()];
+  const bubble = piece();
+  const part = (into, geo, color, x, y, z, outline = false, ghost = null, rotX = 0) => {
+    const g = coloured(geo, color, x, y, z, 0, rotX);
+    into.solid.push(g);
+    if (outline) into.hull.push(g);
+    if (ghost) into.ghost.push(g);
+  };
 
-  for (const side of [-1, 1]) {
-    const hip = new THREE.Group();
-    hip.position.set(0, side * 0.19, 0.8);
+  [-1, 1].forEach((side, i) => {
+    const hip = legs[i];
     part(hip, rbox(0.3, 0.28, 0.62, 0.1), fit.pants, 0, 0, -0.32, o);
     if (cowboy) {
       part(hip, rbox(0.42, 0.3, 0.3, 0.1), fit.shoes, 0.05, 0, -0.62, o);
@@ -388,17 +384,11 @@ export function makePerson(kind) {
       part(hip, rbox(0.48, 0.32, 0.06, 0.03), "#adb5bd", 0.07, 0, -0.77);
       part(hip, rbox(0.06, 0.31, 0.05, 0.02), fit.trim, 0.2, 0, -0.66);
     }
-    body.add(hip);
-    legs.push(hip);
-
-    const shoulder = new THREE.Group();
-    shoulder.position.set(0, side * 0.5, 1.44);
+    const shoulder = arms[i];
     part(shoulder, rbox(0.24, 0.22, 0.5, 0.08), fit.top, 0, 0, -0.22, o);
     part(shoulder, rbox(0.25, 0.23, 0.08, 0.03), fit.trim, 0, 0, -0.46);
     part(shoulder, rbox(0.2, 0.2, 0.18, 0.07), SKIN, 0, 0, -0.58, o);
-    body.add(shoulder);
-    arms.push(shoulder);
-  }
+  });
 
   // Torso.
   part(body, rbox(0.5, 0.82, 0.74, 0.18, 3), fit.top, 0, 0, 1.15, o, fit.top);
@@ -407,10 +397,10 @@ export function makePerson(kind) {
     part(body, rbox(0.05, 0.8, 0.66, 0.03), fit.vest, -0.26, 0, 1.15);
     part(body, rbox(0.52, 0.85, 0.1, 0.03), "#3d2b1f", 0, 0, 0.82);
     part(body, rbox(0.04, 0.17, 0.11, 0.02), "#fcc419", 0.27, 0, 0.82);
-    const star = part(body, rbox(0.03, 0.13, 0.13, 0.01), "#ffd43b", 0.3, 0.24, 1.27);
-    part(star, rbox(0.03, 0.13, 0.13, 0.01), "#ffd43b", 0, 0, 0).rotation.x = Math.PI / 4;
+    part(body, rbox(0.03, 0.13, 0.13, 0.01), "#ffd43b", 0.3, 0.24, 1.27);
+    part(body, rbox(0.03, 0.13, 0.13, 0.01), "#ffd43b", 0.3, 0.24, 1.27, false, null, Math.PI / 4);
     part(body, rbox(0.52, 0.8, 0.1, 0.04), fit.scarf, 0, 0, 1.5);
-    part(body, rbox(0.04, 0.22, 0.2, 0.03), fit.scarf, 0.27, 0, 1.4).rotation.x = Math.PI / 4;
+    part(body, rbox(0.04, 0.22, 0.2, 0.03), fit.scarf, 0.27, 0, 1.4, false, null, Math.PI / 4);
     part(body, rbox(0.16, 0.08, 0.34, 0.04), "#6b4226", 0, -0.46, 0.76, o);
     part(body, rbox(0.12, 0.1, 0.14, 0.03), "#495057", -0.02, -0.46, 0.98);
   } else {
@@ -433,8 +423,8 @@ export function makePerson(kind) {
     part(body, rbox(0.04, 0.15, 0.17, 0.03), "#ffffff", 0.355, y, 1.97);
     part(body, rbox(0.04, 0.08, 0.11, 0.02), INK, 0.37, y * 0.85, 1.96);
     part(body, rbox(0.02, 0.03, 0.03, 0.005), "#ffffff", 0.39, y * 0.75, 1.99);
-    const brow = part(body, rbox(0.04, 0.16, 0.04, 0.01), fit.hair, 0.36, y, 2.09);
-    if (cowboy) brow.rotation.x = y > 0 ? 0.3 : -0.3;
+    part(body, rbox(0.04, 0.16, 0.04, 0.01), fit.hair, 0.36, y, 2.09, false, null,
+      cowboy ? (y > 0 ? 0.3 : -0.3) : 0);
     part(body, rbox(0.02, 0.1, 0.06, 0.02), "#ffb3a7", 0.355, y * 1.5, 1.85);
   }
   part(body, rbox(0.08, 0.1, 0.1, 0.03), "#f4b183", 0.38, 0, 1.9);
@@ -455,11 +445,53 @@ export function makePerson(kind) {
   }
 
   // "!" bubble, above the head and not turning with the body.
-  const bubble = new THREE.Group();
-  bubble.position.z = 3.4;
   part(bubble, rbox(0.7, 0.3, 0.9, 0.14), "#ffffff", 0, 0, 0, o);
   part(bubble, rbox(0.16, 0.08, 0.44, 0.04), "#e03131", 0, -0.17, 0.12);
   part(bubble, rbox(0.16, 0.08, 0.14, 0.04), "#e03131", 0, -0.17, -0.27);
+  const merge = (geos) => (geos.length ? mergeGeometries(geos) : null);
+  const done = (p) => ({ solid: merge(p.solid), hull: merge(p.hull), ghost: merge(p.ghost) });
+  const template = {
+    body: done(body), legs: legs.map(done), arms: arms.map(done), bubble: done(bubble),
+    ghost: fit.top,
+  };
+  personTemplates.set(kind, template);
+  return template;
+}
+
+export function makePerson(kind) {
+  const t = personTemplate(kind);
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  root.add(body);
+  shadow(root, 0.8, 0.8);
+  const add = (parent, piece) => {
+    const mesh = new THREE.Mesh(piece.solid, PERSON_MAT);
+    mesh.renderOrder = 2;
+    parent.add(mesh);
+    if (piece.hull) {
+      const hull = new THREE.Mesh(piece.hull, OUTLINE_PERSON);
+      hull.renderOrder = 2;
+      parent.add(hull);
+    }
+    if (piece.ghost) {
+      const ghost = new THREE.Mesh(piece.ghost, xray(t.ghost));
+      ghost.renderOrder = 1;   // before the person, so it never shows through its own parts
+      parent.add(ghost);
+    }
+  };
+  const joint = (piece, y, z) => {
+    const g = new THREE.Group();
+    g.position.set(0, y, z);
+    add(g, piece);
+    body.add(g);
+    return g;
+  };
+  const legs = [-1, 1].map((side, i) => joint(t.legs[i], side * HIP[0], HIP[1]));
+  const arms = [-1, 1].map((side, i) => joint(t.arms[i], side * SHOULDER[0], SHOULDER[1]));
+  add(body, t.body);
+  const bubble = new THREE.Group();
+  bubble.position.z = 3.4;
+  add(bubble, t.bubble);
   bubble.visible = false;
   root.add(bubble);
   return { root, body, legs, arms, bubble, kind };
@@ -484,6 +516,23 @@ function makePin(color) {
   }
   pin.visible = false;
   return pin;
+}
+
+// A Bounty Hunter's sight circle on the ground (zoomed out, the flat map draws it).
+const SIGHT_DISC = new THREE.CircleGeometry(1, 72);
+const SIGHT_EDGE = new THREE.RingGeometry(0.99, 1, 96);
+const SIGHT_FILL_MAT = new THREE.MeshBasicMaterial({
+  color: "#fa5252", transparent: true, opacity: 0.1, depthWrite: false,
+});
+const SIGHT_EDGE_MAT = new THREE.MeshBasicMaterial({
+  color: "#fa5252", transparent: true, opacity: 0.6, depthWrite: false,
+});
+
+function makeSight() {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(SIGHT_DISC, SIGHT_FILL_MAT), new THREE.Mesh(SIGHT_EDGE, SIGHT_EDGE_MAT));
+  g.position.z = 0.08;
+  return g;
 }
 
 function makeRing(color) {
@@ -751,63 +800,13 @@ const BUILDING_FRAG = `
     #include <colorspace_fragment>
   }`;
 
-// Roof props share the houses' material: non-indexed, no uv, like ExtrudeGeometry.
-const propCache = new Map();
-function propGeo(x, y, z, radius) {
-  const key = `${x},${y},${z},${radius}`;
-  if (!propCache.has(key)) {
-    const g = rbox(x, y, z, radius).toNonIndexed();
-    g.deleteAttribute("uv");
-    propCache.set(key, g);
-  }
-  return propCache.get(key);
-}
-
-/** Replace each sharp corner of a ring with a short curve, so blocks have soft vertical edges. */
-function roundRing(ring, radius) {
-  const out = [];
-  const n = ring.length;
-  for (let i = 0; i < n; i++) {
-    const p = ring[(i + n - 1) % n];
-    const v = ring[i];
-    const q = ring[(i + 1) % n];
-    const ax = p.x - v.x, ay = p.y - v.y, bx = q.x - v.x, by = q.y - v.y;
-    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
-    if (la < 1e-6 || lb < 1e-6) continue;
-    const cos = (ax * bx + ay * by) / (la * lb);
-    if (cos < -0.94) { out.push(v); continue; }   // nearly straight
-    const r = Math.min(radius, la * 0.4, lb * 0.4);
-    const a = new THREE.Vector2(v.x + (ax / la) * r, v.y + (ay / la) * r);
-    const b = new THREE.Vector2(v.x + (bx / lb) * r, v.y + (by / lb) * r);
-    out.push(a);
-    for (const t of [0.33, 0.67]) {
-      const u = 1 - t;
-      out.push(new THREE.Vector2(u * u * a.x + 2 * u * t * v.x + t * t * b.x,
-        u * u * a.y + 2 * u * t * v.y + t * t * b.y));
-    }
-    out.push(b);
-  }
-  return out;
-}
-
-function ringArea(ring) {
-  let s = 0;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    s += (ring[j].x - ring[i].x) * (ring[j].y + ring[i].y);
-  }
-  return Math.abs(s) / 2;
-}
-
-function pointInRing(x, y, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = ring[i], b = ring[j];
-    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
+// Roof props share the houses' material: non-indexed, position and normal only, like the
+// extruded houses.
+const ROOF_PROPS = Object.fromEntries(Object.entries(PROPS).map(([name, [x, y, z, r]]) => {
+  const g = rbox(x, y, z, r).toNonIndexed();
+  g.deleteAttribute("uv");
+  return [name, g];
+}));
 
 // --- the layer -----------------------------------------------------------------------------
 
@@ -897,9 +896,10 @@ export class ToyTown {
     this.world = null;
     this.seen = new Set();          // buildings and tree cells already made
     this.queue = [];
-    this.pending = [];
-    this.flushedAt = 0;
+    this.gen = 0;                   // district number, so late houses of the last one are dropped
     this.buildingMeshes = [];
+    this.batcher = new Batcher((arrays) => this.addHouses(arrays));
+    this.startWorker();
     this.vehicles = new Map();
     this.people = new Map();
     this.clock = new THREE.Clock();
@@ -917,14 +917,14 @@ export class ToyTown {
     });
     this.town = new THREE.Group();    // buildings, trees and stops: they grow with zoom
     this.scene.add(this.town);
-    this.trees = new THREE.InstancedMesh(TREE_GEO,
-      new THREE.MeshToonMaterial({ vertexColors: true, gradientMap }), MAX_TREES);
-    this.trees.count = 0;
-    this.trees.frustumCulled = false;
-    this.town.add(this.trees);
+    this.treeMaterial = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap });
+    this.treeCells = new Map();
+    this.treeCount = 0;
     this.stops = null;
     this.actors = new THREE.Group();  // vehicles, people and the jail
     this.scene.add(this.actors);
+    this.ground = new THREE.Group();  // sight circles: on the ground, not scaled with people
+    this.actors.add(this.ground);
     this.jail = null;
   }
 
@@ -959,11 +959,15 @@ export class ToyTown {
     for (const mesh of this.buildingMeshes) { this.town.remove(mesh); mesh.geometry.dispose(); }
     this.buildingMeshes = [];
     this.queue = [];
-    this.pending = [];
+    this.gen++;
+    this.batcher.clear();
     this.seen.clear();
-    this.trees.count = 0;
+    for (const mesh of this.treeCells.values()) { this.town.remove(mesh); mesh.dispose(); }
+    this.treeCells.clear();
+    this.treeCount = 0;
     for (const rec of [...this.vehicles.values(), ...this.people.values()]) {
       this.actors.remove(rec.root);
+      if (rec.sight) this.ground.remove(rec.sight);
     }
     this.vehicles.clear();
     this.people.clear();
@@ -1034,8 +1038,21 @@ export class ToyTown {
     }
   }
 
+  // The instanced trees of square (ci, cj), made when the first tree is planted there.
+  treeCell(ci, cj) {
+    const key = `${ci},${cj}`;
+    let mesh = this.treeCells.get(key);
+    if (!mesh) {
+      mesh = new THREE.InstancedMesh(TREE_GEO, this.treeMaterial, TREE_CELL * TREE_CELL);
+      mesh.count = 0;
+      this.treeCells.set(key, mesh);
+      this.town.add(mesh);
+    }
+    return mesh;
+  }
+
   plantTrees(poly, density) {
-    if (this.trees.count >= MAX_TREES) return;
+    if (this.treeCount >= MAX_TREES) return;
     const ring = poly[0].map(([lon, lat]) => this.local(lat, lon));
     const holes = poly.slice(1).map((h) => h.map(([lon, lat]) => this.local(lat, lon)));
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -1045,9 +1062,10 @@ export class ToyTown {
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const color = new THREE.Color();
+    const touched = new Set();
     for (let i = Math.floor(x0 / TREE_SPACING_M); i <= x1 / TREE_SPACING_M; i++) {
       for (let j = Math.floor(y0 / TREE_SPACING_M); j <= y1 / TREE_SPACING_M; j++) {
-        if (this.trees.count >= MAX_TREES) break;
+        if (this.treeCount >= MAX_TREES) break;
         const key = `t${i},${j}`;
         if (this.seen.has(key)) continue;
         const h = hash(i * 7919 + j * 104729);
@@ -1059,120 +1077,84 @@ export class ToyTown {
         const s = 1.1 + 0.5 * hash(h * 23 + 3);
         q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), hash(h * 29) * Math.PI);
         m.compose(new THREE.Vector3(x, y, 0), q, new THREE.Vector3(s, s, s));
-        const k = this.trees.count++;
-        this.trees.setMatrixAt(k, m);
-        this.trees.setColorAt(k, color.setHSL(0.0, 0, 0.85 + 0.15 * hash(h * 31)));
+        const cell = this.treeCell(Math.floor(i / TREE_CELL), Math.floor(j / TREE_CELL));
+        const k = cell.count++;
+        this.treeCount++;
+        cell.setMatrixAt(k, m);
+        cell.setColorAt(k, color.setHSL(0.0, 0, 0.85 + 0.15 * hash(h * 31)));
+        touched.add(cell);
       }
     }
-    this.trees.instanceMatrix.needsUpdate = true;
-    if (this.trees.instanceColor) this.trees.instanceColor.needsUpdate = true;
+    for (const cell of touched) {
+      cell.instanceMatrix.needsUpdate = true;
+      if (cell.instanceColor) cell.instanceColor.needsUpdate = true;
+      cell.computeBoundingSphere();   // for culling: the trees planted so far
+    }
   }
 
-  // Turn queued footprints into rounded blocks, a few milliseconds per frame.
+  // Houses are made off the main thread: a module worker gets footprints in local metres and
+  // sends back merged arrays per map square. Without workers (or if it fails to start), they
+  // are made here, a couple of milliseconds a frame.
+  startWorker() {
+    this.worker = null;
+    this.inflight = 0;
+    try {
+      const worker = new Worker(new URL("./houses-worker.js", import.meta.url), { type: "module" });
+      worker.onmessage = ({ data }) => {
+        if (data.type === "done") this.inflight = Math.max(0, this.inflight - 1);
+        else if (data.gen === this.gen) this.addHouses(data.arrays);
+      };
+      worker.onerror = () => { worker.terminate(); this.worker = null; this.inflight = 0; };
+      const props = {};
+      const transfer = [];
+      for (const [name, g] of Object.entries(ROOF_PROPS)) {
+        const position = g.attributes.position.array.slice();
+        const normal = g.attributes.normal.array.slice();
+        props[name] = { position, normal };
+        transfer.push(position.buffer, normal.buffer);
+      }
+      worker.postMessage({ type: "props", props }, transfer);
+      this.worker = worker;
+    } catch {
+      this.worker = null;
+    }
+  }
+
+  // A queued footprint, in local metres for houses.js.
+  footprint({ poly, height, id }) {
+    const pts = (ring) => ring.slice(0, -1).map(([lon, lat]) => {
+      const v = this.local(lat, lon);
+      return [v.x, v.y];
+    });
+    const ring = pts(poly[0]);
+    const inside = ring.length > 0 && this.area(ring[0][0], ring[0][1]);
+    return { ring, holes: poly.slice(1).map(pts), height, id, inside };
+  }
+
   buildSome() {
+    if (!this.queue.length) return;
+    if (this.worker) {
+      // Two batches in flight keep the worker busy without queueing far ahead of the camera.
+      while (this.queue.length && this.inflight < 2) {
+        const houses = this.queue.splice(-BATCH_HOUSES).reverse().map((f) => this.footprint(f));
+        this.worker.postMessage({ type: "build", gen: this.gen, houses, last: !this.queue.length });
+        this.inflight++;
+      }
+      return;
+    }
     const t0 = performance.now();
     while (this.queue.length && performance.now() - t0 < BUILD_BUDGET_MS) {
-      const geos = this.makeBuilding(this.queue.pop());
-      if (geos) this.pending.push(...geos);
-      if (this.pending.length >= CHUNK_SIZE) this.flush();
+      const house = this.footprint(this.queue.pop());
+      const geos = house.ring.length ? makeBuilding(house, ROOF_PROPS) : null;
+      if (geos) this.batcher.add(cellOf(house.ring[0][0], house.ring[0][1]), geos);
     }
-    // Show what is ready every so often, so the nearest houses appear first.
-    if (this.pending.length && (!this.queue.length || t0 - this.flushedAt > 400)) this.flush();
+    this.batcher.tick(!this.queue.length);
   }
 
-  flush() {
-    this.flushedAt = performance.now();
-    const merged = mergeGeometries(this.pending, false);
-    for (const g of this.pending) g.dispose();
-    this.pending = [];
-    if (!merged) return;
-    merged.computeBoundingSphere();
-    const mesh = new THREE.Mesh(merged, this.buildingMaterial);
+  addHouses(arrays) {
+    const mesh = new THREE.Mesh(fromArrays(arrays), this.buildingMaterial);
     this.buildingMeshes.push(mesh);
     this.town.add(mesh);
-  }
-
-  // Chimneys on smaller roofs, air-conditioning boxes on big flat ones.
-  roofProps(ring, h, seed) {
-    const area = ringArea(ring);
-    const props = [];
-    if (area < 30) return props;
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const v of ring) {
-      x0 = Math.min(x0, v.x); y0 = Math.min(y0, v.y); x1 = Math.max(x1, v.x); y1 = Math.max(y1, v.y);
-    }
-    const spot = (k) => {
-      for (let tries = 0; tries < 12; tries++) {
-        const x = x0 + (x1 - x0) * hash(seed * 31 + k * 7 + tries);
-        const y = y0 + (y1 - y0) * hash(seed * 57 + k * 11 + tries * 3);
-        if (pointInRing(x, y, ring)) return [x, y];
-      }
-      return null;
-    };
-    const big = area > 250;
-    const count = big ? 1 + Math.floor(hash(seed * 3) * 3) : Math.floor(hash(seed * 5) * 3);
-    for (let k = 0; k < count; k++) {
-      const at = spot(k);
-      if (!at) continue;
-      const [x, y] = at;
-      if (big && k % 2 === 0) {
-        props.push([propGeo(2.4, 1.8, 1.0, 0.18), x, y, h + 0.4, "#dee2e6", "#adb5bd"]);
-        props.push([propGeo(1.2, 1.2, 0.1, 0.04), x, y, h + 0.95, "#868e96", "#868e96"]);
-      } else {
-        props.push([propGeo(0.8, 0.8, 1.6, 0.12), x, y, h + 0.6, "#c8553d", "#c8553d"]);
-        props.push([propGeo(1.0, 1.0, 0.22, 0.06), x, y, h + 1.45, "#5c4033", "#5c4033"]);
-      }
-    }
-    return props;
-  }
-
-  makeBuilding({ poly, height, id }) {
-    const ring = poly[0].slice(0, -1).map(([lon, lat]) => this.local(lat, lon));
-    if (ring.length < 3) return null;
-    const area = ringArea(ring);
-    if (area < 12) return null;
-    const h = Math.min(26, Math.max(4.5, height * HEIGHT_SCALE));
-    const bevel = Math.min(0.9, Math.sqrt(area) * 0.07);
-    const shape = new THREE.Shape(roundRing(ring, 1.6));
-    for (const hole of poly.slice(1)) {
-      const pts = hole.slice(0, -1).map(([lon, lat]) => this.local(lat, lon));
-      if (pts.length >= 3) shape.holes.push(new THREE.Path(pts));
-    }
-    let geo;
-    try {
-      geo = new THREE.ExtrudeGeometry(shape, {
-        depth: Math.max(0.5, h - bevel), bevelEnabled: true, bevelThickness: bevel,
-        bevelSize: bevel, bevelOffset: -bevel, bevelSegments: 2, curveSegments: 1,
-      });
-    } catch {
-      return null;
-    }
-    geo.deleteAttribute("uv");
-    if (!geo.attributes.position.count) { geo.dispose(); return null; }
-    const c = ring[0];
-    const seed = hash(c.x * 0.37 + c.y * 1.71 + id * 0.013);
-    const wall = new THREE.Color(WALLS[Math.floor(seed * WALLS.length)]);
-    const roof = new THREE.Color(ROOFS[Math.floor(hash(seed * 91) * ROOFS.length)]);
-    const inside = this.area(c.x, c.y) ? 1 : 0;
-    const label = (g, wallColor, roofColor, top) => {
-      const n = g.attributes.position.count;
-      const attr = (size, values) => {
-        const arr = new Float32Array(n * size);
-        for (let i = 0; i < n; i++) arr.set(values, i * size);
-        return new THREE.BufferAttribute(arr, size);
-      };
-      g.setAttribute("wall", attr(3, [wallColor.r, wallColor.g, wallColor.b]));
-      g.setAttribute("roof", attr(3, [roofColor.r, roofColor.g, roofColor.b]));
-      g.setAttribute("top", attr(1, [top]));   // 0: no facade (chimneys and the like)
-      g.setAttribute("seed", attr(1, [seed * 100]));
-      g.setAttribute("inside", attr(1, [inside]));
-      return g;
-    };
-    const geos = [label(geo, wall, roof, h)];
-    for (const [base, x, y, z, side, cap] of this.roofProps(ring, h, seed)) {
-      geos.push(label(base.clone().translate(x, y, z), new THREE.Color(side), new THREE.Color(cap), 0));
-    }
-    return geos;
   }
 
   // --- actors ----------------------------------------------------------------------------
@@ -1208,7 +1190,7 @@ export class ToyTown {
       player: true });
     s.hunters.forEach((h, i) => people.push({
       key: `hunter${i}`, kind: role === "hunter" ? "team" : "hunter", pos: h.pos,
-      state: h.riding ? "ride" : "walk", alert: h.chasing,
+      state: h.riding ? "ride" : "walk", alert: h.chasing, sight: true,
     }));
     // Other Dodgers: teammates when you run, the ones in sight when you hunt. The caught
     // are out of the round.
@@ -1223,7 +1205,7 @@ export class ToyTown {
     for (const p of people) {
       keys.add(p.key);
       let rec = this.people.get(p.key);
-      if (rec && rec.kind !== p.kind) { this.actors.remove(rec.root); rec = null; }
+      if (rec && rec.kind !== p.kind) { this.dropPerson(rec); rec = null; }
       if (!rec) {
         rec = { ...makePerson(p.kind), heading: null, angle: 0 };
         rec.pin = makePin(ROLE_COLORS[p.kind]);
@@ -1239,10 +1221,15 @@ export class ToyTown {
       this.retarget(rec, this.local(p.pos[0], p.pos[1]));
       rec.state = p.state;
       rec.bubble.visible = !!p.alert;
+      if (p.sight && !rec.sight) {
+        rec.sight = makeSight();
+        this.ground.add(rec.sight);
+      }
+      if (rec.sight) rec.sight.visible = !!p.sight && p.state !== "ride";
       rec.trip = p.player && s.ride ? s.ride.trip : null;
     }
     for (const [key, rec] of this.people) {
-      if (!keys.has(key)) { this.actors.remove(rec.root); this.people.delete(key); }
+      if (!keys.has(key)) { this.dropPerson(rec); this.people.delete(key); }
     }
 
     if (s.jail) {
@@ -1254,6 +1241,11 @@ export class ToyTown {
       this.jail.root.position.set(at.x, at.y, 0);
       this.jail.busy = s.jail.busy;
     }
+  }
+
+  dropPerson(rec) {
+    this.actors.remove(rec.root);
+    if (rec.sight) this.ground.remove(rec.sight);
   }
 
   retarget(rec, target) {
@@ -1313,6 +1305,10 @@ export class ToyTown {
       rec.pin.visible = riding;
       if (riding) rec.pin.position.z = 1.4 + Math.abs(Math.sin(t * 3)) * 0.35;
       rec.root.scale.setScalar(personK);
+      if (rec.sight) {
+        rec.sight.position.set(rec.pos.x, rec.pos.y, 0.08);
+        rec.sight.scale.setScalar(this.world.sight_radius_m);
+      }
       const walking = !riding && rec.speed > 0.4;
       const swing = walking ? Math.sin(t * 11) * 0.6 : 0;
       rec.legs[0].rotation.y = swing;
