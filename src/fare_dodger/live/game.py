@@ -39,6 +39,12 @@ from fare_dodger.timeutil import format_hms
 #: Departures listed at a stop: how far ahead and how many.
 DEPARTURE_HORIZON_S = 15 * 60
 DEPARTURE_LIMIT = 6
+#: A departure's direction is the bearing of its next this many metres (straight across the
+#: bends of the street), and it lists this many stops it goes via.
+HEADING_M = 300.0
+VIA_STOPS = 3
+#: How much of a line ahead the client is given to draw.
+AHEAD_M = 1500.0
 #: Movement and catches are evaluated at least this often (timetable seconds).
 MAX_SUBSTEP_S = 1.0
 #: Blocked by a wall, try these turns (radians) to slide along it, the straight way first.
@@ -75,6 +81,8 @@ class Keys:
     down: bool = False
     left: bool = False
     right: bool = False
+    #: Shift: sprint while the stamina lasts.
+    sprint: bool = False
     #: The map view's rotation (degrees clockwise from north), so up means "up on screen".
     bearing: float = 0.0
 
@@ -125,6 +133,9 @@ class Traveller:
     #: Running on coffee until this time.
     boosted_until: float | None = None
     coffees: int = 0
+    #: Sprint stamina, from 0 (spent) to 1 (full).
+    stamina: float = 1.0
+    sprinting: bool = False
     #: A bot's street route.
     follower: RouteFollower = field(default_factory=RouteFollower)
 
@@ -714,10 +725,11 @@ class LiveGame:
                 self._move(runner.traveller, h, direction, target)
             elif runner.player is not None:
                 keys = self.humans[runner.player].keys
-                self._move(runner.traveller, h, keys.direction(), None)
+                self._move(runner.traveller, h, keys.direction(), None, keys.sprint)
         for human in self.humans.values():
             if human.role is Role.HUNTER:
-                self._move(human.traveller, h, human.keys.direction(), None)
+                keys = human.keys
+                self._move(human.traveller, h, keys.direction(), None, keys.sprint)
         if self.status is not Status.RUNNING:
             return
         self.hunters.advance(
@@ -737,11 +749,20 @@ class LiveGame:
             self.caught_by = self.summary(self.default_player) if self.default_player else None
 
     def _move(
-        self, who: Traveller, h: float, direction: Point | None, target: Point | None
+        self,
+        who: Traveller,
+        h: float,
+        direction: Point | None,
+        target: Point | None,
+        sprint: bool = False,
     ) -> None:
         """Advance ``who`` by ``h`` seconds: walking along ``direction`` (a unit vector) or
-        straight towards ``target``, or waiting, boarding, riding and paying fines."""
+        straight towards ``target``, or waiting, boarding, riding and paying fines.
+        ``sprint``: run faster while the stamina lasts."""
         world = self.world
+        moving = direction is not None and direction != (0.0, 0.0)
+        on_foot = who.ride is None and who.held_until is None and who.brewing_until is None
+        self._use_stamina(who, h, sprint and moving and on_foot)
         if who.boosted_until is not None and self.t >= who.boosted_until:
             who.boosted_until = None
             self._tell(who, "coffee", "The coffee wore off.")
@@ -774,8 +795,10 @@ class LiveGame:
                 if who.pays_fares:
                     self._board(who, who.ride, dep)
                 return
-        boosted = who.boosted_until is not None
-        step = (self.cfg.coffee_speed_mps if boosted else self.cfg.walk_speed_mps) * h
+        speed = self.cfg.walk_speed_mps * (self.cfg.sprint_factor if who.sprinting else 1.0)
+        if who.boosted_until is not None:
+            speed = max(speed, self.cfg.coffee_speed_mps)
+        step = speed * h
         if target is not None:  # bots: along the streets (straight without street data)
             old = who.pos
             if world.streets is not None:
@@ -787,6 +810,17 @@ class LiveGame:
         if direction is None or direction == (0.0, 0.0):
             return
         self._walk_free(who, step, direction)
+
+    def _use_stamina(self, who: Traveller, h: float, sprint: bool) -> None:
+        """Spend stamina while sprinting (until it runs out), refill it otherwise. A spent
+        sprint needs a quarter of the stamina back before it starts again."""
+        cfg = self.cfg
+        if sprint and (who.sprinting or who.stamina >= 0.25) and who.stamina > 0:
+            who.sprinting = True
+            who.stamina = max(who.stamina - h / cfg.sprint_s, 0.0)
+        else:
+            who.sprinting = False
+            who.stamina = min(who.stamina + h / cfg.sprint_recover_s, 1.0)
 
     def _walk_free(self, who: Traveller, step: float, direction: Point) -> None:
         """Walk anywhere in the play area except into a building or the water (bridges are
@@ -1060,6 +1094,27 @@ class LiveGame:
 
     # --- client view -----------------------------------------------------------------------
 
+    def heading(self, pattern: int, pos: int) -> dict[str, Any]:
+        """Which way a vehicle of ``pattern`` goes from its stop ``pos``: the compass bearing
+        of the next ``HEADING_M`` metres, and the next stops (``pattern`` and ``pos`` let the
+        client fetch the line ahead)."""
+        world, names = self.world, self.world.tt.node_name
+        stops = world.tt.pattern_stops(pattern)
+        here = names[stops[pos]]
+        via: list[str] = []
+        for node in stops[pos + 1 :]:
+            name = names[node]
+            if name != here and name not in via:
+                via.append(name)
+            if len(via) == VIA_STOPS:
+                break
+        ahead = world.path_ahead(pattern, pos, 0.0, HEADING_M)
+        bearing = None
+        if len(ahead) >= 2:
+            (x0, y0), (x1, y1) = ahead[0], ahead[-1]
+            bearing = round(math.degrees(math.atan2(x1 - x0, y1 - y0)) % 360)
+        return {"pattern": pattern, "pos": pos, "bearing": bearing, "via": via}
+
     def _latlon(self, p: Point) -> list[float]:
         lat, lon = self.world.proj.to_latlon(p)
         return [round(lat, 6), round(lon, 6)]
@@ -1079,6 +1134,7 @@ class LiveGame:
             state = world.trip_state(r.trip, t)
             nxt = min((state.stop + 1) if state else len(stops) - 1, len(stops) - 1)
             ride = {
+                **self.heading(world.trip_pattern[r.trip], nxt),
                 "trip": r.trip,
                 "route": world.route(r.trip),
                 "mode": world.mode(r.trip).value,
@@ -1103,6 +1159,7 @@ class LiveGame:
                         "headsign": dep.headsign,
                         "in_s": round(dep.time - t),
                         "waiting": waiting is not None and waiting.trip == dep.trip,
+                        **self.heading(dep.pattern, dep.pos),
                     }
                     for dep in self.departures(pid)
                 ],
@@ -1183,7 +1240,13 @@ class LiveGame:
                 if me is not None and me.caught
                 else None
             ),
-            "player": {"pos": self._latlon(p.pos), "state": state_name, "name": human.name},
+            "player": {
+                "pos": self._latlon(p.pos),
+                "state": state_name,
+                "name": human.name,
+                "stamina": round(p.stamina, 2),
+                "sprinting": p.sprinting,
+            },
             "wallet": {"money": p.money, "tickets": p.tickets} if p.pays_fares else None,
             "held_s": round(p.held_until - t) if p.held_until is not None else None,
             "jailed": p.jailed,

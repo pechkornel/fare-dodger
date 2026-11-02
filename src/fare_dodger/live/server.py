@@ -53,7 +53,7 @@ from fastapi.staticfiles import StaticFiles
 from fare_dodger.config import LiveConfig
 from fare_dodger.live.admin import Admin, memory_mib
 from fare_dodger.live.districts import DistrictPool
-from fare_dodger.live.game import Keys, LiveGame, Role, world_view
+from fare_dodger.live.game import AHEAD_M, Keys, LiveGame, Role, world_view
 from fare_dodger.live.match import District, Match, Team
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -186,6 +186,21 @@ def create_app(
             world = await pool.prepare(index)
             views[index] = {**world_view(world, cfg), "name": pool.name(index)}
         return views[index]
+
+    @app.get("/api/ahead/{index}/{pattern}/{pos}")
+    def get_ahead(index: int, pattern: int, pos: int) -> dict[str, Any]:
+        """The line a vehicle takes from a stop, for the map: departures and rides send only
+        ``pattern`` and ``pos``."""
+        if not 0 <= index < len(pool) or not pool.ready(index):
+            raise HTTPException(status_code=404, detail="no such district")
+        world = pool.get(index)
+        if not 0 <= pattern < world.tt.n_patterns:
+            raise HTTPException(status_code=404, detail="no such line")
+        stops = world.tt.pattern_stops(pattern)
+        if not 0 <= pos < len(stops) - 1:
+            raise HTTPException(status_code=404, detail="no such stop")
+        path = world.path_ahead(pattern, pos, 0.0, AHEAD_M)
+        return {"path": [[round(c, 6) for c in world.proj.to_latlon(q)] for q in path]}
 
     @app.get("/api/backdrop")
     def backdrop() -> dict[str, int]:
@@ -550,6 +565,7 @@ def apply_message(game: LiveGame, msg: dict[str, Any], pid: str | None = None) -
                 down=bool(msg.get("down")),
                 left=bool(msg.get("left")),
                 right=bool(msg.get("right")),
+                sprint=bool(msg.get("sprint")),
                 bearing=float(msg.get("bearing") or 0.0)
                 if isinstance(msg.get("bearing"), (int, float))
                 else 0.0,

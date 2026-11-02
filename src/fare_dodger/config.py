@@ -220,11 +220,11 @@ class LiveConfig(_Frozen):
     #: picked at random, so rounds are played at night too. Empty: always ``start_time``.
     start_times: tuple[str, ...] = ()
     start_jitter_minutes: int = Field(default=0, ge=0)
-    duration_minutes: int = Field(default=35, gt=0)
+    duration_minutes: int = Field(default=30, gt=0)
     #: Timetable seconds that pass per real second.
     time_scale: float = Field(default=9.0, gt=0)
     #: The Bounty Hunters learn the Dodger's position this often (timetable seconds).
-    ping_every_s: int = Field(default=180, gt=0)
+    ping_every_s: int = Field(default=120, gt=0)
     #: The Bounty Hunters always outnumber the Dodgers by this many (bots fill the places).
     hunter_extra: int = Field(default=3, ge=0)
     #: Real seconds of countdown before each round, while nobody can move.
@@ -232,6 +232,12 @@ class LiveConfig(_Frozen):
     #: A brisk jog: faster than real walking so rounds stay short, still well below the
     #: vehicles (and street routes are longer than the straight line).
     walk_speed_kmh: float = Field(default=10.0, gt=0)
+    #: Sprinting (Shift, humans on foot): ``sprint_factor`` times the jogging speed until the
+    #: stamina runs out after ``sprint_s``; it refills over ``sprint_recover_s`` while not
+    #: sprinting (timetable seconds; at 9x, 5 and 12 real seconds).
+    sprint_factor: float = Field(default=1.6, ge=1)
+    sprint_s: float = Field(default=45.0, gt=0)
+    sprint_recover_s: float = Field(default=108.0, gt=0)
     #: A Bounty Hunter on foot this close to an exposed Dodger catches them.
     catch_radius_m: float = Field(default=25.0, gt=0)
     #: A Bounty Hunter on foot spots a Dodger on foot within this distance and gives chase.

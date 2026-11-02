@@ -91,8 +91,15 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 .stop h3 { margin: 10px 0 4px; font-size: 15px; display: flex; justify-content: space-between;
   align-items: center; gap: 6px; }
 .stop h3 .chip { font-size: 12px; cursor: pointer; background: var(--sun); }
-.dep { display: grid; grid-template-columns: 18px 58px 1fr auto; gap: 6px; align-items: center;
-  padding: 3px 6px; border-radius: 10px; font-size: 14px; }
+.dep { display: grid; grid-template-columns: 18px 58px 22px 1fr auto; gap: 6px; align-items: center;
+  padding: 3px 6px; border-radius: 10px; font-size: 14px; cursor: default; }
+.dep.hover { background: var(--paper-2); }
+.dir { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--ink); color: #fff; font-size: 13px; vertical-align: middle; }
+.dir:empty { background: none; }
+.dir i { font-style: normal; display: block; line-height: 1; }
+.dep .headsign small { display: block; font-size: 11px; color: var(--muted); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; }
 .dep.waiting { background: #d3f9d8; outline: 2px solid var(--player); }
 .dep .key { color: var(--muted); font-weight: 700; }
 .dep .in { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600; }
@@ -160,6 +167,26 @@ html, body { margin: 0; height: 100%; background: #f4e9d0; color: var(--ink);
 .toast.coffee { background: #f1d3b3; }
 .toast.inspection, .toast.fine { background: #e5dbff; }
 @keyframes fade { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Danger: a red edge that beats with the heartbeat */
+#vignette { position: absolute; inset: 0; z-index: 900; pointer-events: none; opacity: 0;
+  transition: opacity 0.4s; box-shadow: inset 0 0 120px 40px rgba(224, 49, 49, 0.75); }
+#vignette.beat { animation: beat 0.45s ease-out; }
+@keyframes beat { 0% { box-shadow: inset 0 0 160px 70px rgba(224, 49, 49, 0.9); }
+  100% { box-shadow: inset 0 0 120px 40px rgba(224, 49, 49, 0.75); } }
+#map.shake { animation: shake 0.5s; }
+@keyframes shake { 0%, 100% { transform: translate(0, 0); } 15% { transform: translate(-14px, 6px); }
+  30% { transform: translate(12px, -8px); } 45% { transform: translate(-9px, -4px); }
+  60% { transform: translate(7px, 6px); } 80% { transform: translate(-3px, 2px); } }
+
+/* Sprint stamina */
+#stamina { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 1000;
+  display: flex; gap: 8px; align-items: center; padding: 6px 12px; pointer-events: none; }
+#stamina[hidden] { display: none; }
+#stamina .bar { width: 160px; height: 10px; border-radius: 5px; background: rgba(43, 33, 24, 0.2);
+  overflow: hidden; }
+#stamina-bar { height: 100%; background: var(--sun); transition: width 0.1s linear; }
+#stamina.low #stamina-bar { background: var(--danger); }
 
 /* KONTROLL! burst */
 #burst { position: absolute; inset: 0; z-index: 1500; display: grid; place-items: center;

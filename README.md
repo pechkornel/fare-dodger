@@ -57,20 +57,25 @@ teams, CS-style.
   everyone. A match is quick (best of 3) or long (best of 6), picked in the menu: the first
   team past half of the regulation points wins (2 of 3 or 4 of 6 in 1v1).
 - **Rounds:** each round starts at a random time of day, from the 🌙 night buses of the small
-  hours to the evening rush. It lasts about 4 real minutes (35 timetable minutes at 9× speed) and is
+  hours to the evening rush. It lasts about 3⅓ real minutes (30 timetable minutes at 9× speed) and is
   played on a different Budapest district, picked at random from 21 around the city. The
   Danube is a wall: cross it on the bridges.
 - **Sides:** teams switch sides at halftime. After a tie, they switch every round until one
   team leads by two. **Esc** leaves to the menu.
 - **Controls:** **WASD** move you up, left, down and right on the screen; hold two for a
   diagonal. You can walk anywhere except through buildings: streets, rail lines, parks and
-  squares are all open, and you slide along walls. **Right-drag** turns the map, and **N** turns
-  it back to north. The streets (for the bots' routes), buildings and cafés come from
-  OpenStreetMap and are downloaded once, about 40 MB; use `--no-osm` to skip them. Stand at a
-  stop and press **E** (or **1–6** to pick a
-  departure) to wait for a real tram, trolleybus, bus or metro. Press **E** again to get off at
-  the next stop. Press **E** again (or click the switch, bottom right: blue on board, red getting
-  off) to stay on. **Enter** starts the next round.
+  squares are all open, and you slide along walls. Hold **Shift** to sprint (1.6× as fast, for
+  about 5 real seconds; the ⚡ bar refills when you let go). **Right-drag** turns the map, and
+  **N** turns it back to north. The streets (for the bots' routes), buildings and cafés come
+  from OpenStreetMap and are downloaded once, about 40 MB; use `--no-osm` to skip them. Stand at
+  a stop and press **E** (or **1–6** to pick a departure) to wait for a real tram, trolleybus,
+  bus or metro. Each departure shows an arrow for the way it goes and the next stops it calls
+  at. Hover over one (or wait for it) to see its way ahead drawn on the map; on board, the map
+  shows where your ride goes next. Press **E** again to get off at the next stop. Press **E**
+  again (or click the switch, bottom right: blue on board, red getting off) to stay on.
+  **Enter** starts the next round. **M** turns the sound on or off: a heartbeat (and a red
+  screen edge) when a Bounty Hunter is close, doors and a whoosh when you board, alarms for
+  inspections and catches.
 - **As the Dodger:** survive. You start with 1,000 Ft. Buy a ticket at a stop with **T**
   (450 Ft), or *bliccel* and ride without one.
   - Earn money with packages: 📦 boxes wait around the district (only the Dodgers see them).
@@ -88,7 +93,7 @@ teams, CS-style.
     Bounty Hunters are told, so it's a race: run when the door opens.
   - You see the Bounty Hunters only within 200 m and zoomed in. Otherwise the top bar shows
     how far the nearest one is: red when close, green when far.
-  - Four Bounty Hunters learn your position every 180 timetable seconds (20 real seconds), chase you within 200 m,
+  - Four Bounty Hunters learn your position every 120 timetable seconds (13 real seconds), chase you within 200 m,
     and catch you when you are both on foot (waiting at a stop counts), or when they ride
     the same vehicle. Staying aboard is safe.
 - **As a Bounty Hunter:** hunt the Dodgers with your team. You see them only up close (200 m, zoomed in) or
