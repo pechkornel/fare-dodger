@@ -58,3 +58,18 @@ duration_minutes = 25
 ping_every_s = 150
 fine_hold_s = 45
 jail_s = 15.0
+
+[[variant]]
+name = "fast: 25 min, reports 100"
+duration_minutes = 25
+ping_every_s = 100
+
+[[variant]]
+name = "fast: 25 min, reports 90"
+duration_minutes = 25
+ping_every_s = 90
+
+[[variant]]
+name = "fast: 30 min, reports 120"
+duration_minutes = 30
+ping_every_s = 120

@@ -6,6 +6,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Live game: faster rounds. A round is 30 timetable minutes (about 3⅓ real minutes, was 4),
+  and the Bounty Hunters get a report every 120 timetable seconds (13 real seconds, was 20).
+  In a balance spree over four districts the bot Dodger escaped 47% (the old rules: 39%), and
+  a Dodger standing still 8%. Shorter rounds alone favoured the Dodger: 25 minutes gave
+  55-60% even with reports every 10 seconds.
+
 ### Added
 - Live game: sprint. Hold Shift to run 1.6 times as fast for about 5 real seconds; the ⚡
   stamina bar refills over 12 seconds, and a spent sprint needs a quarter of it back. Both

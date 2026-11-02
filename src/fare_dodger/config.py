@@ -220,11 +220,11 @@ class LiveConfig(_Frozen):
     #: picked at random, so rounds are played at night too. Empty: always ``start_time``.
     start_times: tuple[str, ...] = ()
     start_jitter_minutes: int = Field(default=0, ge=0)
-    duration_minutes: int = Field(default=35, gt=0)
+    duration_minutes: int = Field(default=30, gt=0)
     #: Timetable seconds that pass per real second.
     time_scale: float = Field(default=9.0, gt=0)
     #: The Bounty Hunters learn the Dodger's position this often (timetable seconds).
-    ping_every_s: int = Field(default=180, gt=0)
+    ping_every_s: int = Field(default=120, gt=0)
     #: The Bounty Hunters always outnumber the Dodgers by this many (bots fill the places).
     hunter_extra: int = Field(default=3, ge=0)
     #: Real seconds of countdown before each round, while nobody can move.

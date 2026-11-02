@@ -192,6 +192,6 @@ def test_the_lengths_report_simulates_matches_for_balanced_variants() -> None:
     out = [outcome("baseline", i < 9) for i in range(20)]
     out += [outcome("easy", i < 18) for i in range(20)]
     text = bal.lengths_report(variants, LiveConfig(), out, [3, 6], skill=0.1, n=500)
-    assert "| baseline | 35 | 45% |" in text and "| easy | 20 | 90% |" in text
+    assert "| baseline | 30 | 45% |" in text and "| easy | 20 | 90% |" in text
     assert "| baseline | 3 |" in text and "| baseline | 6 |" in text
     assert "| easy | 3 |" not in text  # not balanced

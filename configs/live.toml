@@ -36,9 +36,9 @@ start_time = "08:00"
 # evening, and the night buses in the small hours.
 start_times = ["01:00", "02:30", "06:30", "08:00", "10:30", "13:00", "16:30", "18:00", "20:30", "22:30"]
 start_jitter_minutes = 25
-duration_minutes = 35
-time_scale = 9.0             # timetable seconds per real second (35 min = about 4 real minutes)
-ping_every_s = 180           # the Bounty Hunters learn the Dodger's position this often (20 s)
+duration_minutes = 30
+time_scale = 9.0             # timetable seconds per real second (30 min = about 3⅓ real minutes)
+ping_every_s = 120           # the Bounty Hunters learn the Dodger's position this often (13 s)
 hunter_extra = 3             # Bounty Hunters = Dodgers + 3 (bots fill the team)
 freeze_s = 3.0               # real seconds of countdown before each round
 walk_speed_kmh = 10.0        # a brisk jog; walking is along the streets

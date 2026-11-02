@@ -57,7 +57,7 @@ teams, CS-style.
   everyone. A match is quick (best of 3) or long (best of 6), picked in the menu: the first
   team past half of the regulation points wins (2 of 3 or 4 of 6 in 1v1).
 - **Rounds:** each round starts at a random time of day, from the 🌙 night buses of the small
-  hours to the evening rush. It lasts about 4 real minutes (35 timetable minutes at 9× speed) and is
+  hours to the evening rush. It lasts about 3⅓ real minutes (30 timetable minutes at 9× speed) and is
   played on a different Budapest district, picked at random from 21 around the city. The
   Danube is a wall: cross it on the bridges.
 - **Sides:** teams switch sides at halftime. After a tie, they switch every round until one
@@ -93,7 +93,7 @@ teams, CS-style.
     Bounty Hunters are told, so it's a race: run when the door opens.
   - You see the Bounty Hunters only within 200 m and zoomed in. Otherwise the top bar shows
     how far the nearest one is: red when close, green when far.
-  - Four Bounty Hunters learn your position every 180 timetable seconds (20 real seconds), chase you within 200 m,
+  - Four Bounty Hunters learn your position every 120 timetable seconds (13 real seconds), chase you within 200 m,
     and catch you when you are both on foot (waiting at a stop counts), or when they ride
     the same vehicle. Staying aboard is safe.
 - **As a Bounty Hunter:** hunt the Dodgers with your team. You see them only up close (200 m, zoomed in) or
