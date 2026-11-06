@@ -248,6 +248,8 @@ In short: under the v0 rules the greedy Dodger beats the best Inspector bots 76%
 time. Revealing the Dodger's modes every round and its position every 2nd round brings
 that to 46.5%, close to the 45% balance target.
 
+![Dodger win rate per rule variant with Wilson 95% intervals](docs/img/balance.png)
+
 ## Development
 
 ```sh
