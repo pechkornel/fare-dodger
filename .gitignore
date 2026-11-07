@@ -30,3 +30,6 @@ Thumbs.db
 
 # Local Claude Code settings and worktrees
 .claude/
+
+# Claude Code subagent worktrees
+.claude/worktrees/
